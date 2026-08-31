@@ -1,0 +1,5 @@
+requests>=2.28
+parsel>=1.8
+lxml>=4.9
+openpyxl>=3.1
+PyYAML>=6.0

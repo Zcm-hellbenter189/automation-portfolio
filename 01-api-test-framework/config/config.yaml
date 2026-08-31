@@ -1,0 +1,30 @@
+# 接口自动化框架配置：多环境
+# 用法: pytest --env=dev（默认 dev，指向本地 mock 服务）
+# 切换环境: pytest --env=test / pytest --env=prod
+
+dev:
+  base_url: "http://127.0.0.1:8000"
+  timeout: 10
+  retry_times: 1
+  headers:
+    Content-Type: "application/json"
+
+test:
+  base_url: "http://127.0.0.1:8000"
+  timeout: 10
+  retry_times: 1
+  headers:
+    Content-Type: "application/json"
+
+# 示例：接入真实环境时只需改 base_url，用例代码零改动
+prod:
+  base_url: "https://api.example.com"
+  timeout: 15
+  retry_times: 2
+  headers:
+    Content-Type: "application/json"
+
+# 登录依赖的默认账号（演示用）
+login:
+  username: admin
+  password: "123456"

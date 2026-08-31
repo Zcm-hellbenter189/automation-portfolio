@@ -1,0 +1,40 @@
+{
+  // 作用：消除 IDE 的 import 红线（reportMissingImports / "Unresolved reference"）。
+  // 根因：工作区根是 automation-portfolio，而 core / utils / config / testcases 等顶层包
+  //       位于下一层子项目目录内；静态分析器不执行代码，默认不会把子项目根加入搜索路径。
+  // 这里用 extraPaths 把三个子项目根补进搜索路径，使其与运行时（python -m pytest）的
+  // sys.path 保持一致。零代码改动，详见 docs/code-review-01-api-test-framework.md。
+  //
+  // 注意：本文件供 VS Code / Pylance / pyright CLI 使用。
+  //       PyCharm 读的是 .idea 里的 Sources Root 标记，不读本文件，
+  //       PyCharm 用户请看报告「方案 A1 / A2」。
+  "extraPaths": [
+    "01-api-test-framework",
+    "02-compliant-crawler",
+    "03-rpa-monitor"
+  ],
+  "include": [
+    "01-api-test-framework",
+    "02-compliant-crawler",
+    "03-rpa-monitor"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "**/.venv",
+    "**/venv",
+    "**/reports",
+    "**/logs",
+    "**/export",
+    "**/node_modules"
+  ],
+  // 源码使用了 dict | None 写法，最低 Python 3.10
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "basic",
+  // 兜底：仓库内暂无 .venv，若解释器未安装 requests/pytest/yaml，
+  // 未解析到的第三方库降级为警告（黄线）而非错误（红线），不再刷屏。
+  // 装好依赖后建议改回 "error"，以便真实暴露缺失的模块。
+  "reportMissingImports": "warning"
+}
+
+

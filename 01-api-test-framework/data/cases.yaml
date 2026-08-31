@@ -1,0 +1,45 @@
+# 数据驱动用例数据：一条数据 = 一条用例
+# 新增用例只需在这里加一行，不需要改测试代码
+
+login:
+  - name: "正确账号密码登录成功"
+    payload:
+      username: admin
+      password: "123456"
+    expect:
+      status_code: 200
+      code: 0
+  - name: "密码错误返回401"
+    payload:
+      username: admin
+      password: "wrong-password"
+    expect:
+      status_code: 401
+      code: 1001
+  - name: "缺少用户名返回400"
+    payload:
+      password: "123456"
+    expect:
+      status_code: 400
+      code: 1002
+  - name: "缺少密码返回400"
+    payload:
+      username: admin
+    expect:
+      status_code: 400
+      code: 1002
+
+create_user:
+  - name: "正常创建用户"
+    payload:
+      name: "张三"
+      age: 25
+    expect:
+      status_code: 200
+      code: 0
+  - name: "缺少姓名返回400"
+    payload:
+      age: 25
+    expect:
+      status_code: 400
+      code: 1002

@@ -1,0 +1,30 @@
+# 爬虫配置：目标站点 / 合规参数 / 存储
+# 用法: python main.py --source mock|douban [--limit N]
+
+targets:
+  mock:
+    name: "本地演示站点（零合规风险，断网可跑）"
+    start_url: "http://127.0.0.1:9000/top250?start=0"
+    page_url: "http://127.0.0.1:9000/top250?start={start}"
+    page_size: 25
+    max_pages: 2
+    # 本地站点不配置 robots_url，跳过校验
+
+  douban:
+    name: "豆瓣读书 Top250（公开榜单，须遵守限速与 robots.txt）"
+    start_url: "https://book.douban.com/top250?start=0&filter="
+    page_url: "https://book.douban.com/top250?start={start}&filter="
+    page_size: 25
+    max_pages: 10
+    robots_url: "https://book.douban.com/robots.txt"
+
+# 合规红线参数（请勿放宽）
+politeness:
+  request_interval: 3.0      # 每次请求间隔（秒），遵守 Crawl-delay 精神
+  max_retries: 2
+  timeout: 10
+  user_agent: "CompliantCrawler/1.0 (demo-education; contact: your@email.com)"
+
+storage:
+  csv_path: "data/books.csv"
+  sqlite_path: "data/books.db"

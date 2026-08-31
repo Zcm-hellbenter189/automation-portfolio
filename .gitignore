@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+*.log
+
+# 运行产物
+reports/
+export/
+*.db
+*.xlsx
+
+# 02/03 的 data/ 是运行产物（books.csv / books.db / monitor.db），忽略
+# 01 的 data/ 是源码级测试数据（cases.yaml，数据驱动用例依赖它），必须提交
+# 注意：这里必须带前导 / 写成仓库根相对路径，否则会误伤 01-api-test-framework/data/
+/02-compliant-crawler/data/
+/03-rpa-monitor/data/
+
+# 环境/系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# IDE 插件数据（CodeBuddy 的工作记忆/计划，属于本地私有数据，不随作品集公开）
+.codebuddy/
+
+

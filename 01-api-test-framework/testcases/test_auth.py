@@ -5,10 +5,11 @@ from core import assertions
 from utils.data_loader import load_yaml
 from config.loader import BASE_DIR
 
+# 读取登录用例数据
 CASES = load_yaml(BASE_DIR / "data" / "cases.yaml")["login"]
 
-
-@pytest.mark.parametrize("case", CASES, ids=[c["name"] for c in CASES])
+# 数据驱动登录用例
+@pytest.mark.parametrize("case", CASES, ids=[c.get("name","未命名用例") for c in CASES]) #ids列表推导式动态生成用例名称
 def test_login(client, case):
     """数据驱动登录用例"""
     resp = client.post("/api/login", json=case["payload"])

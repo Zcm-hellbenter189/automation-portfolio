@@ -27,16 +27,24 @@ python -m venv .venv
 .venv\Scripts\activate
 # 2. 安装依赖
 pip install -r requirements.txt
-# 3. 一键运行（自动启动 Mock 服务并执行全部用例）
+# 3. 【最常用】一键全跑（自动起 mock、跑用例、出报告）
 python run.py
+# 手工跑（需先开 mock）
+python mock_server.py --port 8000     # 终端 A
+pytest -m "not slow"                  # 终端 B：跳过慢用例，日常提速
+pytest -m slow                        # 只跑慢用例
+pytest testcases/test_auth.py         # 只跑单个文件
+pytest testcases/test_auth.py -k "login"   # 按名称过滤
+pytest --env=test                     # 切换环境
+pytest -v                             # 看每条用例名
+pytest --collect-only -q              # 只收集不执行（查用例总数）
+
+# 自定义端口（被占用时 run.py 也会自动换）
+python run.py --port 9000
+
+跑完看两处：终端底部「测试结果摘要」（通过率）、`reports/report.html`（逐条明细）。
 # 4. 打开测试报告
 reports/report.html
-```
-
-手工运行（需先启动 mock）：
-```bash
-python mock_server.py --port 8000
-pytest testcases --html=reports/report.html --self-contained-html
 ```
 
 ## 运行效果
@@ -73,7 +81,3 @@ pytest testcases --html=reports/report.html --self-contained-html
 ## 简历亮点写法
 
 > 独立设计并实现接口自动化测试框架：基于 Requests + Pytest，支持数据驱动、多环境切换、接口依赖传递（变量池）、统一断言与性能断言；封装 HTTP 客户端实现鉴权注入、超时控制与指数退避重试；集成 pytest-html 报告与一键运行脚本，实现「clone 即跑」，覆盖登录鉴权、CRUD、业务异常、性能等 15+ 用例场景。
-
-## 代码评审
-
-完整的架构评审与问题清单见 [`docs/code-review-01-api-test-framework.md`](../docs/code-review-01-api-test-framework.md)。

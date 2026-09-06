@@ -1,8 +1,5 @@
 """下单接口用例：完整依赖链 登录 → 创建用户 → 下单"""
 from core import assertions
-from core.http_client import HttpClient
-
-BASE_URL = "http://127.0.0.1:8000"
 
 
 def test_place_order_uses_dependency_chain(client, auto_login):
@@ -34,8 +31,7 @@ def test_place_order_invalid_user(client, auto_login):
     assertions.assert_code(resp, 1005)
 
 
-def test_place_order_without_token():
+def test_place_order_without_token(unauth_client):
     """未登录下单应返回 401（用独立 client 验证，避免 token 干扰）"""
-    unauth = HttpClient(base_url=BASE_URL)
-    resp = unauth.post("/api/orders", json={"user_id": 1, "product": "x", "amount": 1})
+    resp = unauth_client.post("/api/orders", json={"user_id": 1, "product": "x", "amount": 1})
     assertions.assert_status_code(resp, 401)

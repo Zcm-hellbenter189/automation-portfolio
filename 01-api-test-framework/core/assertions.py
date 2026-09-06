@@ -3,20 +3,31 @@
 设计要点:
   - 断言集中管理，用例层写起来简洁、报错信息明确
   - 校验维度: HTTP 状态码 + 业务 code + 字段值 + 字段类型 + 耗时
+  - 断言失败时附带响应体摘要，排查问题无需再去翻日志
 """
+
+
+def _body_preview(resp, limit: int = 160) -> str:
+    """截取响应体前 limit 字符作为断言失败的排错上下文"""
+    try:
+        text = resp.text
+    except Exception:
+        return ""
+    text = (text or "").replace("\n", " ").strip()
+    return f" | 响应体: {text[:limit]}" if text else ""
 
 
 def assert_status_code(resp, expected: int):
     """断言 HTTP 状态码"""
     assert resp.status_code == expected, \
-        f"HTTP 状态码不符: 实际 {resp.status_code}，期望 {expected}"
+        f"HTTP 状态码不符: 实际 {resp.status_code}，期望 {expected}{_body_preview(resp)}"
 
 
 def assert_code(resp, expected_code: int):
     """断言业务 code 字段"""
     data = resp.json()
     assert data.get("code") == expected_code, \
-        f"业务 code 不符: 实际 {data.get('code')}，期望 {expected_code}"
+        f"业务 code 不符: 实际 {data.get('code')}，期望 {expected_code}{_body_preview(resp)}"
 
 
 def assert_json_field(resp, field: str, expected=None, value_type=None):
@@ -43,3 +54,4 @@ def assert_elapsed_less_than(resp, seconds: float):
     """断言响应耗时低于阈值（性能断言）"""
     elapsed = resp.elapsed.total_seconds()
     assert elapsed < seconds, f"响应耗时超限: {elapsed:.2f}s >= {seconds}s"
+

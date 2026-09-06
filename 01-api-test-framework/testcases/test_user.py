@@ -2,22 +2,15 @@
 import pytest
 
 from core import assertions
-from core.http_client import HttpClient
 from utils.data_loader import load_yaml
 from config.loader import BASE_DIR
 
 CREATE_CASES = load_yaml(BASE_DIR / "data" / "cases.yaml")["create_user"]
-BASE_URL = "http://127.0.0.1:8000"
 
 
-def _unauth_client() -> HttpClient:
-    """构造一个未登录的独立客户端（避免 session 级 token 干扰）"""
-    return HttpClient(base_url=BASE_URL)
-
-
-def test_users_require_auth():
+def test_users_require_auth(unauth_client):
     """未登录访问用户列表应返回 401"""
-    resp = _unauth_client().get("/api/users")
+    resp = unauth_client.get("/api/users")
     assertions.assert_status_code(resp, 401)
 
 
@@ -33,13 +26,11 @@ def test_create_user(client, auto_login, case):
         assertions.assert_code(resp, expect["code"])
         assertions.assert_required_fields(resp, ["id", "name", "age"])
         assertions.assert_json_field(resp, "age", value_type=int)
-        # 写入变量池，供下单依赖链使用
-        auto_login.set("user_id", resp.json()["data"]["id"])
 
 
-def test_get_user_exists(client, auto_login):
-    """查询已存在的用户"""
-    uid = auto_login.get("user_id")
+def test_get_user_exists(client, created_user):
+    """查询已创建的用户"""
+    uid = created_user["id"]
     resp = client.get(f"/api/users/{uid}")
     assertions.assert_status_code(resp, 200)
     assertions.assert_code(resp, 0)
@@ -53,8 +44,13 @@ def test_get_user_not_found(client, auto_login):
     assertions.assert_code(resp, 1003)
 
 
+@pytest.mark.slow
 def test_slow_api_within_timeout(client, auto_login):
-    """慢响应接口应在超时阈值内返回（性能断言）"""
+    """慢响应接口应在超时阈值内返回（性能断言）
+
+    标记为 slow：该用例请求 /api/slow，Mock 固定睡 3 秒，
+    日常开发用 `pytest -m "not slow"` 跳过以提速，CI 全量执行。
+    """
     resp = client.get("/api/slow")
     assertions.assert_status_code(resp, 200)
     assertions.assert_elapsed_less_than(resp, 10)

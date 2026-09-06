@@ -17,6 +17,7 @@
 """
 import argparse
 import json
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -25,12 +26,17 @@ ADMIN = {"username": "admin", "password": "123456"}
 
 
 class MockHandler(BaseHTTPRequestHandler):
-    """内存态存储放在类属性上，所有请求实例共享"""
+    """内存态存储放在类属性上，所有请求实例共享
+
+    并发安全: ThreadingHTTPServer 每个请求一个实例，
+    自增 id 与字典写入统一由 _lock（类级）保护，避免并发重复 id。
+    """
 
     users = {}
     orders = {}
     next_user_id = 1
     next_order_id = 1001
+    _lock = threading.Lock()
 
     # ---------- 基础方法 ----------
     def log_message(self, fmt, *args):
@@ -105,10 +111,12 @@ class MockHandler(BaseHTTPRequestHandler):
         if not name:
             self._send(400, {"code": 1002, "msg": "缺少参数: name"})
             return
-        uid = self.next_user_id
-        self.next_user_id += 1
-        self.users[uid] = {"id": uid, "name": name, "age": body.get("age", 0)}
-        self._send(200, {"code": 0, "msg": "创建成功", "data": self.users[uid]})
+        with self._lock:
+            uid = self.next_user_id
+            self.next_user_id += 1
+            user = {"id": uid, "name": name, "age": body.get("age", 0)}
+            self.users[uid] = user
+        self._send(200, {"code": 0, "msg": "创建成功", "data": user})
 
     def _handle_list_users(self):
         if not self._is_authed():
@@ -144,15 +152,17 @@ class MockHandler(BaseHTTPRequestHandler):
         if user_id not in self.users:
             self._send(400, {"code": 1005, "msg": "用户不存在，无法下单"})
             return
-        order_id = self.next_order_id
-        self.next_order_id += 1
-        self.orders[order_id] = {
-            "order_id": order_id,
-            "user_id": user_id,
-            "product": product,
-            "amount": body.get("amount", 0),
-        }
-        self._send(200, {"code": 0, "msg": "下单成功", "data": self.orders[order_id]})
+        with self._lock:
+            order_id = self.next_order_id
+            self.next_order_id += 1
+            order = {
+                "order_id": order_id,
+                "user_id": user_id,
+                "product": product,
+                "amount": body.get("amount", 0),
+            }
+            self.orders[order_id] = order
+        self._send(200, {"code": 0, "msg": "下单成功", "data": order})
 
 
 def main():

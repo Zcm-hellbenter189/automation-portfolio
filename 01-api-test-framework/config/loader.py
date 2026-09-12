@@ -24,17 +24,16 @@ def _raw_config() -> dict:
 
 def load_config(env: str = "dev") -> dict:
     """加载指定环境的配置片段
-
     环境名必须是 config.yaml 的顶层 key（login 除外，属账号配置而非环境）。
     拼错环境会立即抛错，避免"静默回落默认值、误以为测的是目标环境"。
     """
     raw = _raw_config()
     if env == "login" or env not in raw:
         available = ", ".join(sorted(k for k in raw if k != "login"))
-        raise ValueError(
+        raise ValueError( # 抛错，避免静默回落默认值
             f"未知环境: {env!r}，可用环境: {available or '(config.yaml 为空)'}"
         )
-    env_cfg = dict(raw[env])
+    env_cfg = dict(raw[env])#新建字典拷贝一份，防止缓存污染
     # 可选：环境变量覆盖（用于 CI/CD 场景）
     if os.environ.get("BASE_URL"):
         env_cfg["base_url"] = os.environ["BASE_URL"]
@@ -44,3 +43,4 @@ def load_config(env: str = "dev") -> dict:
 def load_login() -> dict:
     """加载登录依赖的默认账号（拷贝返回，防调用方污染缓存）"""
     return dict(_raw_config().get("login", {}))
+

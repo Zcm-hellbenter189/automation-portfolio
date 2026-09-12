@@ -54,3 +54,26 @@ def test_slow_api_within_timeout(client, auto_login):
     resp = client.get("/api/slow")
     assertions.assert_status_code(resp, 200)
     assertions.assert_elapsed_less_than(resp, 10)
+
+def test_update_user_success(client,created_user):
+    uid = created_user["id"]
+    old_name,old_age=created_user["name"],created_user["age"]
+    # 新值由旧值派生 → 保证与原值必然不同，且不依赖夹具用的具体名字
+    new_name=f"{old_name}_已改"
+    new_age=old_age+1
+    # ① 发更新请求
+    resp=client.put(f"/api/users/{uid}",json={"name":new_name,"age":new_age})
+    assertions.assert_status_code(resp,200)
+    assertions.assert_code(resp,0)
+    # ② 响应体里应回显更新后的数据
+    assertions.assert_json_field(resp,"name",expected=new_name)
+    assertions.assert_json_field(resp,"age",expected=new_age)
+    # ③ 关键：再查一次，证明是"真的落库了"而不是只回显
+    got_resp=client.get(f"/api/users/{uid}")
+    assertions.assert_status_code(got_resp,200)
+    assertions.assert_json_field(got_resp,"name",expected=new_name)
+    assertions.assert_json_field(got_resp,"age",expected=new_age,value_type=int)
+    assertions.assert_json_field(got_resp,"id",expected=uid)
+
+
+

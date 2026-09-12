@@ -25,13 +25,13 @@ def assert_status_code(resp, expected: int):
 
 def assert_code(resp, expected_code: int):
     """断言业务 code 字段"""
-    data = resp.json()
+    data = resp.json() # 把响应的JSON字符串，自动解析成Python字典/列表
     assert data.get("code") == expected_code, \
         f"业务 code 不符: 实际 {data.get('code')}，期望 {expected_code}{_body_preview(resp)}"
 
 
 def assert_json_field(resp, field: str, expected=None, value_type=None):
-    """断言 data 中某个字段的值和/或类型"""
+    """断言 data 中某个字段的值和类型"""
     data = resp.json().get("data", {})
     assert field in data, f"响应 data 中缺少字段: {field}"
     value = data[field]
@@ -44,9 +44,18 @@ def assert_json_field(resp, field: str, expected=None, value_type=None):
 
 
 def assert_required_fields(resp, fields):
-    """断言 data 中包含所有必填字段"""
+    """断言 data 中包含所有必填字段
+
+    :param resp: requests 的 Response 对象
+    :param fields: 必填字段名列表，如 ["id", "name", "age"]
+    注意：只校验"键是否存在"，不校验值的类型或是否为空；
+         且只检查 data 第一层，嵌套字段（如 data.user.id）需自行拆分。
+    """
+    # 取响应中的 data 子字典；失败响应可能没有 data，用 {} 兜底避免 KeyError
     data = resp.json().get("data", {})
+    # 列表推导式：筛出所有"不在 data 键里"的字段，得到缺失清单
     missing = [f for f in fields if f not in data]
+    # 断言缺失清单为空：为空 → 通过；非空 → 抛异常并列出具体缺哪些字段
     assert not missing, f"响应 data 缺少字段: {missing}"
 
 

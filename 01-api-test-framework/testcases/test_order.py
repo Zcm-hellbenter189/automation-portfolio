@@ -9,6 +9,7 @@ def test_place_order_uses_dependency_chain(client, auto_login):
     auto_login 夹具通过变量池把 token / user_id 自动传递到本用例。
     """
     user_id = auto_login.get("user_id")
+    assert user_id is not None, "前置数据缺失：auto_login 未能提供 user_id"
     resp = client.post("/api/orders", json={
         "user_id": user_id,
         "product": "自动化测试工具",

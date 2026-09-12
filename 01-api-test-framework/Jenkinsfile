@@ -1,0 +1,103 @@
+/* =============================================================================
+ * 接口自动化 · 持续集成流水线（Declarative Pipeline）
+ *
+ * 作用：定时（或代码提交后）自动执行接口自动化用例，产出 Allure / JUnit 报告，
+ *       失败即让构建变红并通知——把「手动跑用例」升级为「持续测试」。
+ *
+ * 挂载方式：
+ *   1. 把本文件放在仓库根 或 01-api-test-framework/ 下；
+ *   2. Jenkins 新建 Pipeline 任务 → Pipeline script from SCM → 选择 Git 仓库；
+ *   3. Script Path 填本文件的相对路径（如 01-api-test-framework/Jenkinsfile）。
+ *
+ * 依赖插件：Git（默认自带）、Pipeline（默认自带）、
+ *          Allure Jenkins Plugin（必需，渲染报告）、Timestamper（可选，日志时间戳）、
+ *          Email Extension Plugin（可选，失败邮件通知）
+ * 前置条件：Jenkins 节点已安装 Python 3.10+，且能成功执行
+ *          pip install -r requirements.lock.txt（锁文件缺失时回退到 requirements.txt）
+ *
+ * 详细接入步骤（从装 Jenkins 到看报告）见 docs/jenkins-ci-guide.md
+ * ============================================================================= */
+pipeline {
+    agent any
+
+    options {
+        timestamps()                                       // 每行日志加时间戳，排错必需
+        timeout(time: 30, unit: 'MINUTES')                 // 防止用例卡死把执行节点占满
+        buildDiscarder(logRotator(numToKeepStr: '30'))      // 只保留最近 30 次构建记录
+        disableConcurrentBuilds()                           // 同任务串行，避免抢 Mock 端口
+    }
+
+    /* 触发方式（三选一，默认用定时）：
+     *   cron        Jenkins 的 cron 语法；H 表示"散列"到某个分钟，避免整点抢资源
+     *   pollSCM     兜底方案：轮询 Git 仓库，有变更就跑（不依赖 Webhook 配置）
+     *   Webhook     在 GitHub 仓库 Settings → Webhooks 指向 <jenkins>/github-webhook/
+     */
+    triggers {
+        cron('H 2 * * *')                // 每天凌晨 2 点左右自动跑一次
+        // pollSCM('H/15 * * * *')       // 兜底：每约 15 分钟检查一次代码变更
+    }
+
+    environment {
+        PYTHONIOENCODING = 'utf-8'       // Windows 控制台输出中文必需，否则报告里是乱码
+        PYTHONUNBUFFERED = '1'           // 日志实时刷出，不要等缓冲区满
+    }
+
+    stages {
+        stage('拉取代码') {
+            steps {
+                checkout scm
+                // 打印本次构建对应的提交号：用例挂了能立刻定位是哪个 commit 引入的
+                bat 'git rev-parse --short HEAD'
+                // Linux 节点请改用： sh 'git rev-parse --short HEAD'
+            }
+        }
+
+        stage('准备环境') {
+            steps {
+                bat 'python --version'
+                /* 优先装"锁文件"：requirements.lock.txt 记录每个依赖的确切版本，
+                 * 保证 CI 装到的版本与开发机完全一致（消除"本地能过、CI 挂"的环境漂移）；
+                 * 锁文件不存在时回退到 requirements.txt（只声明版本下限）。
+                 * 锁文件由本地生成：pip install --dry-run --ignore-installed --report r.json -r requirements.txt
+                 */
+                bat 'if exist requirements.lock.txt (python -m pip install -r requirements.lock.txt) else (python -m pip install -r requirements.txt)'
+                // Linux 节点请改用 sh
+            }
+        }
+
+        stage('接口自动化测试') {
+            steps {
+                /* --ci     = --junitxml --allure，产出两种报告
+                 * --env=test  多环境切换落地：接真实环境只改 config/config.yaml，用例零改动
+                 * 不传 -m，CI 跑全量（含 slow 标记的用例）
+                 * 退出码非 0 → 本阶段自动变红，这是持续集成的关键约定
+                 */
+                bat 'python run.py --env=test --ci'
+            }
+        }
+    }
+
+    post {
+        always {
+            /* 用例明细 + 通过率趋势图（Jenkins 任务页原生展示）
+             * allowEmptyResults：用例收集阶段就崩掉时不要连带 post 一起失败，掩盖真正的报错
+             */
+            junit allowEmptyResults: true, testResults: 'reports/junit.xml'
+
+            // Allure 报告（需 Allure Jenkins Plugin；缺插件此步会报错，装好即可）
+            allure includeProperties: false, jdk: '', results: [[path: 'reports/allure-results']]
+
+            // HTML 报告归档，便于下载取证
+            archiveArtifacts artifacts: 'reports/report.html', allowEmptyArchive: true
+        }
+
+        failure {
+            echo '接口自动化测试失败，请查看本次构建的 Allure 报告定位失败用例'
+            /* 邮件通知示例（需 Email Extension Plugin + 系统 SMTP 配置）：
+             * emailext to: 'you@example.com',
+             *          subject: "接口自动化失败: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+             *          body: "构建地址: ${env.BUILD_URL}\n请查看 Allure 报告中的失败用例。"
+             */
+        }
+    }
+}

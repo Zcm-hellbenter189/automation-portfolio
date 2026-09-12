@@ -1,0 +1,54 @@
+# ============================================================================
+# requirements.lock.txt - pinned dependency versions for reproducible installs
+# ============================================================================
+# What it is:
+#   Exact versions of every package this framework depends on, so CI (Jenkins)
+#   installs the same set as a developer machine - no "works locally,
+#   fails in CI" environment drift.
+#
+# Difference from requirements.txt:
+#   requirements.txt       declares what is needed (version lower bounds, hand-edited)
+#   requirements.lock.txt  records what was actually resolved and installed (exact pins, used by CI)
+#
+# Usage:
+#   pip install -r requirements.lock.txt
+#
+# How it was generated (run once locally, from 01-api-test-framework/):
+#   pip install --dry-run --ignore-installed --report report.json -r requirements.txt
+#   # pip resolves the full dependency closure into report.json; its name/version
+#   # pairs are then written out below as name==version.
+#
+# Verified with: Python 3.12.2 / Windows 11 (venv at repository root)
+#
+# NOTE - keep this file ASCII-only on purpose:
+#   pip decodes a requirements file with the system locale encoding when the file
+#   has no UTF-8 BOM (GBK on Chinese Windows). ASCII comments can never trigger
+#   the UnicodeDecodeError that requirements.txt needed a BOM to avoid, so this
+#   lock file stays copy-paste safe (see README, "Environment setup" item 2).
+#
+# Optional part:
+#   allure-pytest is only needed for `python run.py --allure` / `--ci`.
+#   run.py degrades gracefully when it is missing, so the last three lines
+#   (allure-pytest / allure-python-commons / attrs) can be deleted in
+#   environments that do not render Allure reports.
+# ----------------------------------------------------------------------------
+
+allure-pytest==2.16.0
+allure-python-commons==2.16.0
+attrs==26.1.0
+certifi==2026.7.22
+charset-normalizer==3.5.1
+colorama==0.4.6
+idna==3.19
+iniconfig==2.3.0
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+packaging==26.3
+pluggy==1.6.0
+Pygments==2.21.0
+pytest==9.1.1
+pytest-html==4.2.0
+pytest-metadata==3.1.1
+PyYAML==6.0.3
+requests==2.34.2
+urllib3==2.7.0

@@ -30,9 +30,9 @@ login:
       code: 1002
 
 create_user:
-  - name: "正常创建用户"
+  - name: "正常创建后台用户(要token)"
     payload:
-      name: "张三"
+      name: "李四"
       age: 25
     expect:
       status_code: 200
@@ -43,3 +43,19 @@ create_user:
     expect:
       status_code: 400
       code: 1002
+
+register_user:
+  - name: "注册用户(不要token)"
+    payload:
+      name: "王五"
+      age: 23
+    expect:
+      status_code: 200
+      code: 0
+  - name: "缺少姓名返回400"
+    payload:
+      age: 25
+    expect:
+      status_code: 400
+      code: 1002
+

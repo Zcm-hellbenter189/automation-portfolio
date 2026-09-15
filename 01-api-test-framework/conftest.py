@@ -18,7 +18,7 @@ import pytest
 
 from config.loader import load_config, load_login
 from core.extractor import VariablePool, extract_variables
-from core.http_client import HttpClient
+from core.http_client import HttpClient, logger
 from utils.logger import get_logger
 
 # 与 client / unauth_client 夹具的兜底默认值保持一致
@@ -116,6 +116,8 @@ def unauth_client(env):
     return HttpClient(
         base_url=cfg.get("base_url", "http://127.0.0.1:8000"),
         timeout=cfg.get("timeout", 10),
+        retry_times=cfg.get("retry_times", 0),
+        headers=cfg.get("headers"),
     )
 
 
@@ -139,7 +141,7 @@ def auto_login(client):
     )
     token = extract_variables(resp, {"token": "data.token"})["token"]
     assert token, f"登录响应缺少 token: {resp.text[:200]}"
-    client.token = token
+    client.token = token #副作用：为每个调用auto_login的用例设置token
     pool.set("token", token) # 把 token 存入变量池
 
     # 准备一个依赖用户（user_id），供「下单依赖链」用例使用
@@ -164,7 +166,9 @@ def created_user(client, auto_login):
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
-    """终端输出测试结果摘要：通过率快速反馈，无需打开 HTML 报告"""
+    """
+    会话结束后，打印终端报告的时候触发这个钩子函数
+    终端输出测试结果摘要：通过率快速反馈，无需打开 HTML 报告"""
     collected = getattr(terminalreporter, "_numcollected", None) or 0
     passed = len(terminalreporter.stats.get("passed", []))
     failed = len(terminalreporter.stats.get("failed", []))

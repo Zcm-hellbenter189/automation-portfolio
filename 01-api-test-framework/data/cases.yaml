@@ -49,6 +49,7 @@ register_user:
     payload:
       name: "王五"
       age: 23
+      unique: true
     expect:
       status_code: 200
       code: 0

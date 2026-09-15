@@ -29,7 +29,7 @@ class VariablePool:
 
 
 def extract_variables(resp, mapping: dict) -> dict:
-    """按点号路径从响应 JSON 中提取值，token和id
+    """按点号路径从响应 JSON 中提取值，例如：token和id
 
     mapping 示例: {"user_id": "data.id", "token": "data.token"}
     """

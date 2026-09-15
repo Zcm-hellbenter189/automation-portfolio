@@ -1,8 +1,12 @@
 """公开注册接口用例：无需登录即可注册"""
+import threading
+import time
+
 import pytest
 
 from config.loader import BASE_DIR
 from core import assertions
+from core.http_client import HttpClient
 from utils.data_loader import load_yaml
 
 # 注册用例数据：一条数据 = 一条用例（payload 请求体 + expect 期望结果）
@@ -28,4 +32,50 @@ def test_register_without_token(client, case):
     if resp.status_code == 200:
         assertions.assert_code(resp, expect["code"])
         assertions.assert_required_fields(resp, ["id", "name", "age"])
+
+def test_register_concurrent_same_name(client,auto_login):
+    """并发同名注册：恰好 1 个成功，其余全部 1006，且库里只有 1 条
+
+       这是"判重与写入在同一临界区"的证据：若判重退回锁外，
+       这里会稳定出现多个 200（把 bug 复现出来）。
+       """
+    # 起线程之前生成一次 → 8 个线程共享同一个 name（竞态的前提）
+    name = f"并发用户_{int(time.time() * 1000)}"
+    workers = 8
+    barrier = threading.Barrier(8, timeout=10) # 起跑线：到齐才放行
+    results=[]  # 收集结果（list.append 在 GIL 下是原子的，无需加锁）
+    errors = [] # 收集线程内异常，否则线程静默死亡用例照样绿
+    def register_once():
+        # 每线程独立客户端：requests.Session 不保证线程安全，
+        # 共用会把"服务端竞态"和"客户端乱序"混在一起（违反单一变量原则）
+        http = HttpClient(base_url=client.base_url, timeout=10)
+        try:
+            barrier.wait() # 先集合
+            resp = http.post("/api/register", json={"name": name, "age": 18})
+            results.append((resp.status_code,resp.json().get("code"))) # ← 显式收集
+        except Exception as e:
+            errors.append(repr(e))
+
+    threads = [threading.Thread(target=register_once) for _ in range(workers)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # ① 先确认 8 个线程都正常跑完，否则下面的统计会失真
+    assert not errors, f"线程内出现异常: {errors}"
+    assert len(results) == workers, f"应有 {workers} 个响应，实际 {len(results)} 个"
+
+    # ② 响应分布：恰好 1 个成功，其余全部 1006
+    ok = [r for r in results if r == (200, 0)]
+    dup = [r for r in results if r == (400, 1006)]
+    assert len(ok) == 1, f"应恰好 1 个注册成功，实际 {len(ok)} 个；全部结果={results}"
+    assert len(dup) == workers - 1, f"其余应全部 1006，实际 {len(dup)} 个；全部结果={results}"
+
+    # ③ 数据事实：库里同名用户只能有 1 条
+    # 响应是"服务端的说法"，库才是"事实"——只断响应会漏掉"回了 1006 但照样写入"
+    listed=client.get(f"/api/users") #「需登录，靠 auto_login 注入 token」
+    assertions.assert_status_code(listed,200)
+    matched =[u["name"] for u in listed.json()["data"] if u["name"] == name]
+    assert len(matched )==1,f"同名记录应只有1条，实际{len(matched )}条"
 

@@ -111,7 +111,9 @@ class HttpClient:
           - 请求/响应 body 写入日志，敏感字段（password/token/Authorization 等）自动脱敏。
         """
         url = self.base_url + path
-        kwargs.setdefault("timeout", self.timeout)
+        # 如果没有传入超时时间，则使用默认超时时间
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = self.timeout
 
         merged = dict(self.session.headers)
         merged.update(kwargs.pop("headers", None) or {}) # pop(key, default)：从字典`kwargs`中取出`headers`键，**同时把这个键从 kwargs 里删掉**

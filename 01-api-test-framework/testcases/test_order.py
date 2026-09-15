@@ -36,3 +36,4 @@ def test_place_order_without_token(unauth_client):
     """未登录下单应返回 401（用独立 client 验证，避免 token 干扰）"""
     resp = unauth_client.post("/api/orders", json={"user_id": 1, "product": "x", "amount": 1})
     assertions.assert_status_code(resp, 401)
+

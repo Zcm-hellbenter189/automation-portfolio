@@ -29,11 +29,12 @@ class MockHandler(BaseHTTPRequestHandler):
     """内存态存储放在类属性上，所有请求实例共享
 
     并发安全: ThreadingHTTPServer 每个请求一个实例，
-    自增 id 与字典写入统一由 _lock（类级）保护，避免并发重复 id。
+    自增 id 与字典写入统一由 _lock（类级）保护，避免并发重复 id。f
     """
 
     users = {}  # "用户表"：{id: 用户dict}，全进程共享
     orders = {}  # "订单表"：{order_id: 订单dict}
+    idempotency_key={} # 幂等键表：{idempotency_key: 幂等键表dict}
     next_user_id = 1  # 下一个用户的 id（从 1 递增）
     next_order_id = 1001  # 下一个订单 id（从 1001 递增，故意和用户 id 区分开）
     _lock = threading.Lock()  # 一把共享锁（下划线开头=内部用）
@@ -81,7 +82,9 @@ class MockHandler(BaseHTTPRequestHandler):
         if length <= 0:
             return {}
         try:
-            # 读取指定字节流，utf-8解码，加载为json对象
+            # 1.self.rfile.read(length) 读取指定长度字节流
+            # 2. bytes字节 → 字符串 .decode("utf-8")二进制字节解码成 utf8 文本字符串。
+            # 2. `json.loads(xxx)` json 字符串 → python 字典返回。
             return json.loads(self.rfile.read(length).decode("utf-8"))
         except json.JSONDecodeError:
             # json格式错误时捕获异常，返回空字典
@@ -155,31 +158,45 @@ class MockHandler(BaseHTTPRequestHandler):
 
         与"创建用户"(POST /api/users) 的区别：
         - 本接口不校验 Authorization：陌生访客无需登录即可自助注册；
-        - /api/users 需要登录，属于后台管理类的用户创建。
-        校验顺序：读参 → name 必填 → 重名检查 → 加锁分配 id → 写用户表。
+        - /api/users 需要登录，属于后台管理类的用户创建；
+        - 本接口做 name 唯一性校验（重名返回 1006），/api/users 不做（后台允许同名）。
+        校验顺序：读参 → name 规范化并校验非空 → 加锁（判重 + 分配 id + 写表）。
         """
         # 读取请求体 JSON（字段缺失时 get 返回 None）
         body = self._read_json()
-        name = body.get("name")
-        # name 为必填项，为空返回 400（先拦截后处理）
-        if not name:
-            self._send(400, {"code": 1002, "msg": "缺少参数: name"})
+        raw_name = body.get("name")
+        # 类型 + 非空校验（先拦截后处理）：
+        # 既不能只写 not name（拦住不 "  " 这类纯空白），
+        # 也不能只写 not str(name).strip()（str(None) == "None" 是非空字符串，
+        # 会把"没传 name"放行成名为 "None" 的用户）；
+        # 用 isinstance 而非 str(...) 转换，是为了不做隐式类型转换——
+        # 否则 {"name": {"a": 1}} 会被存成名字 "{'a': 1}"。
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            self._send(400, {"code": 1002, "msg": "name 不能为空"})
             return  # 提前结束，不再往下执行
-        # 重名检查：users 表里已有同名用户则拒绝注册（业务码 1006）
-        if any(u["name"] == name for u in self.users.values()):
+        # 规范化：判重与存储统一使用去空白后的值。
+        # 若只在判重用 strip、存储用原值，"王五" 与 " 王五 " 会被当成两个用户，
+        # 重名检查就被空格绕过了。
+        name = raw_name.strip()
+        # 进入临界区：重名检查 + 分配 id + 计数器递增 + 写入用户表。
+        # 判重必须与写入处于同一临界区，否则两个并发同名请求会同时通过检查（TOCTOU）。
+        with self._lock:
+            # 重名检查：users 表里已有同名用户则拒绝注册（业务码 1006）
+            duplicate = any(u["name"] == name for u in self.users.values())
+            if not duplicate:
+                # 必须用"类名直接 +="，才会更新类属性 next_user_id；
+                # 若写 self.next_user_id += 1，会变成给"当前实例"建属性，
+                # 而每个请求都是新实例，计数器会永远停在 1
+                uid = MockHandler.next_user_id
+                MockHandler.next_user_id += 1
+                user = {"id": uid, "name": name, "age": body.get("age", 0)}  # age 缺省 0
+                self.users[uid] = user  # 原地修改类级共享的 users 表（不是重新赋值）
+                snapshot = dict(user)   # 锁内取快照：字段来源唯一，且不受出锁后被改写影响
+        # 响应放在锁外写：避免持锁做网络 I/O，拖累其他线程的并发
+        if duplicate:
             self._send(400, {"code": 1006, "msg": "用户名已存在"})
             return
-        # 进入临界区：分配 id + 计数器递增 + 写入用户表，保证并发下 id 不重复
-        with self._lock:
-            # 必须用"类名直接 +="，才会更新类属性 next_user_id；
-            # 若写 self.next_user_id += 1，会变成给"当前实例"建属性，
-            # 而每个请求都是新实例，计数器会永远停在 1
-            uid = MockHandler.next_user_id
-            MockHandler.next_user_id += 1
-            user = {"id": uid, "name": name, "age": body.get("age", 0)}  # age 缺省 0
-            self.users[uid] = user  # 原地修改类级共享的 users 表（不是重新赋值）
-        # 响应放在锁外写：避免持锁做网络 I/O，拖累其他线程的并发
-        self._send(200, {"code": 0, "msg": "注册成功", "data": user})
+        self._send(200, {"code": 0, "msg": "注册成功", "data": snapshot})
 
     def _handle_login(self):
         """登录接口处理
@@ -210,8 +227,14 @@ class MockHandler(BaseHTTPRequestHandler):
     def _handle_create_user(self):
         """创建用户接口处理
 
-        处理流程：鉴权 → 读参数 → 校验 name 必填 → 加锁分配 id 并写入用户表。
+        处理流程：鉴权 → 读参数 → name 规范化并校验 → 加锁分配 id 并写入用户表。
         需携带合法 Authorization（已登录），否则直接返回 401。
+
+        与"公开注册"(POST /api/register) 的差异：
+        - 本接口是后台管理类创建，**不做重名校验**：后台允许存在同名用户，
+          name 唯一性只约束自助注册那条路径；
+        - 但 name 的**校验口径与注册接口对齐**（类型 + 去空白后非空），
+          否则同一个输入在两个"建用户"接口上会得到两种结果。
         """
         # 第一步：鉴权，未登录立即拒绝
         if not self._is_authed():
@@ -219,19 +242,23 @@ class MockHandler(BaseHTTPRequestHandler):
             return
         # 第二步：读取请求体
         body = self._read_json()
-        name = body.get("name")
-        # 第三步：name 为必填项，为空返回 400
-        if not name:
-            self._send(400, {"code": 1002, "msg": "缺少参数: name"})
+        raw_name = body.get("name")
+        # 第三步：name 校验，口径与 /api/register 一致（类型 + 去空白后非空）。
+        # 原来写 if not name 有两个问题：纯空白 "  " 会被放行；
+        # 且不做类型校验，{"name": 123} 会以数字形式存进用户表。
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            self._send(400, {"code": 1002, "msg": "name 不能为空"})
             return
+        name = raw_name.strip()     # 规范化：存储用去空白后的值
         # 第四步：进入临界区，保证并发请求下 id 不重复
         with self._lock:
             uid = MockHandler.next_user_id          # 取当前自增 id
             MockHandler.next_user_id += 1           # 计数器 +1，下次使用新 id
             user = {"id": uid, "name": name, "age": body.get("age", 0)}  # age 缺省为 0
             self.users[uid] = user           # 写入共享用户表
+            snapshot = dict(user)            # 锁内取快照，供锁外响应使用
         # 第五步：返回创建成功及新用户数据
-        self._send(200, {"code": 0, "msg": "创建成功", "data": user})
+        self._send(200, {"code": 0, "msg": "创建成功", "data": snapshot})
 
     def _handle_list_users(self):
         """查询用户列表接口处理
@@ -244,8 +271,11 @@ class MockHandler(BaseHTTPRequestHandler):
         if not self._is_authed():
             self._send(401, {"code": 1001, "msg": "未登录或登录已过期"})
             return
-        # users.values() 取出所有用户（dict 的值集合），list(...) 转成列表返回
-        self._send(200, {"code": 0, "msg": "ok", "data": list(self.users.values())})
+        with self._lock:
+            #解决读写竞态，共享可变状态没有统一保护
+            #列表推导式，遍历 users 字典的全部 value，对每个用户执行`dict(u)`生成字典浅拷贝，全部收集组成新列表；目的是生成数据副本，避免外部修改影响原始共享数据。
+            data=[dict(u)for u in self.users.values()]
+        self._send(200, {"code": 0, "msg": "ok", "data": data})
 
     def _handle_get_user(self):
         """查询单个用户接口处理（路径形如 /api/users/{id}）
@@ -309,29 +339,45 @@ class MockHandler(BaseHTTPRequestHandler):
         self._send(200, {"code": 0, "msg": "下单成功", "data": order})
 
     def _handle_update_user(self):
+        """更新用户接口处理（PUT 语义：整体替换）
+
+        name 与 age **均为必填**：PUT 表示用请求体整体替换目标资源，
+        "只改传了的字段"是 PATCH 的语义。若将来确实需要部分更新，
+        应新开 PATCH 接口，而不是把 PUT 悄悄退化成部分更新。
+
+        流程：鉴权 → 读参 → 校验 name/age 均必填 → 解析 id → 查用户
+              → 加锁更新并取快照 → 锁外响应
+        错误码：未登录 401/1001；缺参数 400/1002；id 格式错误 400/1002；
+                用户不存在 404/1003
+        """
         # 鉴权前置校验：未登录直接拒绝
         if not self._is_authed():
             self._send(401, {"code": 1001, "msg": "未登录或登录已过期"})
             return
-        body=self._read_json()
-        name=body.get("name")
-        age=body.get("age")
-        if not name and not age:
-            self._send(400, {"code": 1002, "msg": "缺少参数: name/age"})
+        body = self._read_json()
+        name = body.get("name")
+        age = body.get("age")
+        # 必填校验：用 is None 判断"有没有传"，不能用 truthiness——
+        # if not age 会把合法值 age=0 误判为"没传"。
+        missing = [k for k, v in (("name", name), ("age", age)) if v is None]
+        if missing:
+            self._send(400, {"code": 1002, "msg": f"缺少参数:{','.join(missing)}"})
             return
-        uid=self._parse_user_id()
-        if not uid:
+        uid = self._parse_user_id()
+        # 用 is None 而非 not uid：uid=0 在格式上同样合法（口径统一，不留 truthiness 陷阱）
+        if uid is None:
             self._send(400, {"code": 1002, "msg": "用户 id 格式错误"})
             return
-        user=self.users.get(uid)
+        user = self.users.get(uid)
         if user is None:
             self._send(404, {"code": 1003, "msg": "用户不存在"})
             return
         with self._lock:
-            user["name"]=name
-        if age:
-            user["age"]=age
-        self._send(200, {"code": 0, "msg": "更新成功", "data": user})
+            # 上面已保证两者都非 None（PUT 全量语义），无需再判断
+            user["name"] = name
+            user["age"] = age
+            snapshot = dict(user)   # 锁内取快照：锁外响应必须发快照，否则序列化期间可能被改写
+        self._send(200, {"code": 0, "msg": "更新成功", "data": snapshot})
 
 
 def main():

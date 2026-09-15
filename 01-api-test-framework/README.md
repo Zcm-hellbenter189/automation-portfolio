@@ -119,7 +119,7 @@ pytest -m "not slow"
 **永久生效**（新开终端起效）：
 
 ```bat
-setx PYTHONUTF8 1
+setx PYTHONUTF8 1 （新开终端可能会设置失败（仍然取旧的环境变量副本），需要注销/重启电脑）
 ```
 
 补充两点：
@@ -137,6 +137,13 @@ setx PYTHONUTF8 1
 | `UnicodeDecodeError: 'gbk' codec...` | requirements 文件缺 BOM | 确认文件首字节为 `EF BB BF`；别用 `pip freeze >` 覆盖 |
 | 中文显示成 `???` 或 `\uXXXX` 转义 | 终端编码不是 UTF-8 | 见第 4 条：`chcp 65001` + `set PYTHONUTF8=1`（PowerShell 用 `$env:PYTHONUTF8="1"`），或直接用 `python run.py` |
 | `ModuleNotFoundError: No module named 'xxx'` | 包装到了另一个解释器 | 用 `.venv\Scripts\python.exe -m pip install xxx` |
+| `Fatal Python error: preconfig_init_utf8_mode: invalid PYTHONUTF8 environment variable value` | `PYTHONUTF8` **只接受 `0` / `1`**；写成别的值（如 `2`）、带引号（`"1"`）、带尾随空格都会让解释器在**启动前**直接 abort（一行 Python 都跑不了，`pip`/`pytest` 全废） | ① `echo [%PYTHONUTF8%]` 看真实值（方括号能暴露引号与空格）；② `setx PYTHONUTF8 1`；③ **注销重登**（见下方说明） |
+| 接口报 `RemoteDisconnected` / `Connection aborted`（而非 500） | 服务**起来了**，但 handler 抛了未捕获异常、连接被服务端掐断——`http.server` **不会**把未捕获异常转成 500，所以客户端只看到"连接中断" | 别急着重启服务，先看 mock 服务终端的 `Traceback` |
+
+> **改环境变量后为什么要注销**：环境变量是**进程启动时从父进程继承的内存副本**，运行期不回读注册表。
+> `reg add`/`reg delete` 只改注册表、**不广播**；`setx` 会广播，但依赖接收方响应。
+> 最可靠的收尾是**注销重登**（重登时由 winlogon 重新读取注册表构建全新环境块）。
+> 另外：`setx` 不会回灌**已打开**的终端 —— 当前窗口需 `set "PYTHONUTF8=1"` 才立即生效，PyCharm 也要重启。
 
 ## 快速开始
 
@@ -229,7 +236,7 @@ python run.py -m "not slow"
 └── reports/               运行产物：HTML / JUnit XML / Allure 结果（git 忽略）
 ```
 
-## 简历亮点写法
+## 简历亮点
 
 > 独立设计并实现接口自动化测试框架：基于 Requests + Pytest，支持数据驱动、多环境切换、接口依赖传递（变量池）、统一断言与性能断言；封装 HTTP 客户端实现鉴权注入、超时控制与指数退避重试；集成 pytest-html 报告与一键运行脚本，实现「clone 即跑」，覆盖登录鉴权、CRUD、业务异常、性能等 15+ 用例场景。
 >

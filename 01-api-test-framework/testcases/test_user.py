@@ -56,16 +56,35 @@ def test_slow_api_within_timeout(client, auto_login):
     assertions.assert_elapsed_less_than(resp, 10)
 
 def test_update_user_success(client,created_user):
+    """PUT 更新用户：响应回显 + 二次查询，双重验证""
+
+    三个设计点：
+    1) 为什么用 created_user，而不是共享的夹具数据？
+       本用例会**改变**用户数据。若复用 session 级共享用户，这次改动会污染
+       其他用例的断言 —— 单独跑能过、换个执行顺序（或 xdist 并行）就红，
+       即"用例间顺序耦合"。created_user 是 function 级，每个用例拿到一个
+       专属用户，改坏了也不影响别人。
+
+    2) 为什么新值由旧值派生，而不是直接写死？
+       new_name = old_name + "_已改"：不依赖夹具用的具体名字，夹具改成任何
+       名字都能跑；且**保证新值与原值必然不同** —— 否则可能出现"改成了一个
+       恰好相同的值"，用例绿了却没测出更新是否真的生效。
+
+    3) 为什么要查两次（② 与 ③）？
+       更新接口的响应**可能只是把入参回显出来**，即使根本没落库也照样返回 200。
+       所以必须在同一进程里再 GET 一次，证明数据真的写进了存储 ——
+       这是"响应 ≠ 事实"最典型的场景。
+    """
     uid = created_user["id"]
     old_name,old_age=created_user["name"],created_user["age"]
     # 新值由旧值派生 → 保证与原值必然不同，且不依赖夹具用的具体名字
     new_name=f"{old_name}_已改"
     new_age=old_age+1
-    # ① 发更新请求
+    # ① 发更新请求：先断 HTTP 状态码，再断业务码（成败判据在 code，不只在 status）
     resp=client.put(f"/api/users/{uid}",json={"name":new_name,"age":new_age})
     assertions.assert_status_code(resp,200)
     assertions.assert_code(resp,0)
-    # ② 响应体里应回显更新后的数据
+    # ② 响应体里应回显更新后的数据（这一步只证明"接口说它改了"）
     assertions.assert_json_field(resp,"name",expected=new_name)
     assertions.assert_json_field(resp,"age",expected=new_age)
     # ③ 关键：再查一次，证明是"真的落库了"而不是只回显
@@ -73,6 +92,7 @@ def test_update_user_success(client,created_user):
     assertions.assert_status_code(got_resp,200)
     assertions.assert_json_field(got_resp,"name",expected=new_name)
     assertions.assert_json_field(got_resp,"age",expected=new_age,value_type=int)
+    # id 不应被 PUT 改动：更新只针对可变字段，主键必须稳定
     assertions.assert_json_field(got_resp,"id",expected=uid)
 
 

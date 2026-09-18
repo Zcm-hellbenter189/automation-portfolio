@@ -46,10 +46,11 @@ create_user:
 
 register_user:
   - name: "注册用户(不要token)"
+    unique_name: true
     payload:
       name: "王五"
       age: 23
-      unique: true
+
     expect:
       status_code: 200
       code: 0

@@ -30,4 +30,9 @@ Thumbs.db
 .codebuddy/
 docs/
 
+# 性能测试运行产物（体积大、可重新生成）
+01-api-test-framework/perf/**/*.jtl
+01-api-test-framework/perf/**/report*/
+01-api-test-framework/perf/**/rep*/
+
 

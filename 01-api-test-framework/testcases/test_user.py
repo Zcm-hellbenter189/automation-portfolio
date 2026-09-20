@@ -46,7 +46,7 @@ def test_get_user_not_found(client, auto_login):
 
 @pytest.mark.slow
 def test_slow_api_within_timeout(client, auto_login):
-    """慢响应接口应在超时阈值内返回（性能断言）
+    """慢响应接口应在超时阈值内返回（功能测试里的性能断言）
 
     标记为 slow：该用例请求 /api/slow，Mock 固定睡 3 秒，
     日常开发用 `pytest -m "not slow"` 跳过以提速，CI 全量执行。

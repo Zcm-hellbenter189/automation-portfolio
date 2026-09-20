@@ -24,6 +24,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer  # 导入"�
 TOKEN_PREFIX = "mock-token-"  # token 的统一前缀，鉴权就靠"开头是不是这个"来判断
 ADMIN = {"username": "admin", "password": "123456"}  # 唯一的"合法账号"，写死在代码里（演示用）
 
+class MockHTTPServer(ThreadingHTTPServer):
+    request_queue_size = 128           # accept 队列从 5 调大到128
+    daemon_threads = True
 
 class MockHandler(BaseHTTPRequestHandler):
     """内存态存储放在类属性上，所有请求实例共享
@@ -31,7 +34,7 @@ class MockHandler(BaseHTTPRequestHandler):
     并发安全: ThreadingHTTPServer 每个请求一个实例，
     自增 id 与字典写入统一由 _lock（类级）保护，避免并发重复 id。f
     """
-
+    protocol_version = "HTTP/1.1" # 协议版本号，设置1.1
     users = {}  # "用户表"：{id: 用户dict}，全进程共享
     orders = {}  # "订单表"：{order_id: 订单dict}
     idempotency_key={} # 幂等键表：{idempotency_key: 幂等键表dict}
@@ -390,7 +393,7 @@ def main():
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
     # 创建服务器：监听 127.0.0.1:<port>，每个请求交给一个新的 MockHandler 实例处理
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), MockHandler)
+    server = MockHTTPServer(("127.0.0.1", args.port), MockHandler)
     print(f"Mock 服务已启动: http://127.0.0.1:{args.port}")
     try:
         # 进入无限循环接收请求，直到用户按下 Ctrl+C

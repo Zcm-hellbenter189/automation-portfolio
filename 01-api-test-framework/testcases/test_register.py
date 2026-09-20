@@ -41,7 +41,7 @@ def test_register_without_token(client, case):
         assertions.assert_code(resp, expect["code"])
         assertions.assert_required_fields(resp, ["id", "name", "age"])
 
-@pytest.mark.parametrize("workers", [pytest.param(8, id=f"并发8线程-恰好1个成功200其余400")])
+@pytest.mark.parametrize("workers", [pytest.param(8, id="并发8线程-恰好1个成功200其余400")])
 def test_register_concurrent_same_name(client,auto_login,workers):
     """并发同名注册：恰好 1 个成功，其余全部 1006，且库里只有 1 条
 
@@ -82,7 +82,7 @@ def test_register_concurrent_same_name(client,auto_login,workers):
 
     # ③ 数据事实：库里同名用户只能有 1 条
     # 响应是"服务端的说法"，库才是"事实"——只断响应会漏掉"回了 1006 但照样写入"
-    listed=client.get(f"/api/users") #「需登录，靠 auto_login 注入 token」
+    listed=client.get("/api/users") #「需登录，靠 auto_login 注入 token」
     assertions.assert_status_code(listed,200)
     matched =[u["name"] for u in listed.json()["data"] if u["name"] == name]
     assert len(matched )==1,f"同名记录应只有1条，实际{len(matched )}条"

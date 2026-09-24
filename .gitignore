@@ -28,7 +28,7 @@ Thumbs.db
 
 # IDE 插件数据（CodeBuddy 的工作记忆/计划，属于本地私有数据，不随作品集公开）
 .codebuddy/
-docs/
+private-docs/
 
 # 性能测试运行产物（体积大、可重新生成）
 01-api-test-framework/perf/**/*.jtl

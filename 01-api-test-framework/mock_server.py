@@ -75,23 +75,77 @@ class MockHandler(BaseHTTPRequestHandler):
 
     def _read_json(self):
         """
-        读取HTTP请求体中的JSON数据
+        读取HTTP请求体中的JSON数据（**带缓存**，同一请求内多次调用只真正读一次 rfile）
         从请求头获取Content-Length，按长度读取rfile请求流，解码后解析json
         :return: dict，解析成功返回json字典；无请求体/解析失败返回空字典{}
+
+        为什么要缓存：rfile 是**流**，读一次就消耗掉了。
+        现在分发入口会先无条件消费一次 body（见 _consume_body），
+        后续 handler 必须还能拿到同一份数据 → 只能缓存。
         """
+        # 已有缓存直接返回（缓存值一定是 dict，不会是 None，用它当"是否已读"的标记）
+        cached = getattr(self, "_body_cache", None)
+        if cached is not None:
+            return cached
         # 获取请求体长度，取不到则默认为0
         length = int(self.headers.get("Content-Length") or 0)
-        # 长度小于等于0，说明没有请求体，直接返回空字典
+        # 长度小于等于0，说明没有请求体，缓存空字典
         if length <= 0:
-            return {}
+            self._body_cache = {}
+            return self._body_cache
         try:
             # 1.self.rfile.read(length) 读取指定长度字节流
             # 2. bytes字节 → 字符串 .decode("utf-8")二进制字节解码成 utf8 文本字符串。
             # 2. `json.loads(xxx)` json 字符串 → python 字典返回。
-            return json.loads(self.rfile.read(length).decode("utf-8"))
+            self._body_cache = json.loads(self.rfile.read(length).decode("utf-8"))
         except json.JSONDecodeError:
-            # json格式错误时捕获异常，返回空字典
-            return {}
+            # json格式错误时捕获异常，缓存空字典
+            self._body_cache = {}
+        return self._body_cache
+
+    def _consume_body(self):
+        """无条件把本次请求的请求体读掉（HTTP/1.1 长连接下的**必需动作**）
+
+        为什么必须：
+        - HTTP/1.1 默认 keep-alive，同一条 TCP 连接会连续承载多个请求。
+        - 服务端**必须把当前请求的消息体消费到 Content-Length 指定的边界**，
+          rfile 的读指针才会停在下一条请求的起始位置。
+        - 若某个分支（典型：鉴权失败提前 return）没读 body，残留字节就会被
+          下一条请求解析成请求行 → http.server 抛
+          `Bad request syntax ('{"user_id":1,...}GET /api/users HTTP/1.1')` → 400。
+          （注意：这个 400 是标准库自己抛的 HTML 错误页，不是我们的业务 JSON。）
+
+        ⚠️ 为什么以前没暴露：HTTP/1.0 时代每个响应后**关闭连接**，
+        残留的 body 随连接一起销毁，缺陷被"短连接"掩盖了。
+        改成 HTTP/1.1 打开长连接后，这条隐患立刻浮出水面。
+        """
+        self._read_json()
+
+    def handle_one_request(self):
+        """每个请求开始时**重置请求体缓存**
+
+        ⚠️ 这条是上面缓存机制能成立的前提，务必理解：
+
+        socketserver 的 `BaseRequestHandler.handle()` 是**循环**结构：
+            def handle(self):
+                self.handle_one_request()
+                while not self.close_connection:
+                    self.handle_one_request()
+
+        也就是说：**同一个 handler 实例会服务同一条 TCP 连接上的所有请求**，
+        而不是"每个请求一个新实例"。HTTP/1.0 时每个响应后连接关闭、
+        循环只跑一次，所以这个差别看不出来；**改成 HTTP/1.1 长连接后，
+        实例生命周期从"一个请求"变成"整条连接"，实例属性就在请求之间泄漏了。**
+
+        若不在每个请求开头重置，`_body_cache` 会一直是**上一条请求的 body**：
+          - 新请求的 body 根本不会被读走 → 残留在 rfile → 污染下一条请求；
+          - 而且 handler 拿到的是**上一条请求的数据** → 出现"登录时提示缺少参数"
+            这类看起来毫无道理的报错。
+        """
+        self._body_cache = None   # None = 本次请求的 body 尚未读取
+        # 临时调试：实例内存地址 + 客户端源端口
+        print(f"[mock] 新请求 | 实例={id(self)} | 客户端源端口={self.client_address[1]}")
+        super().handle_one_request()
 
     def _is_authed(self):
         """
@@ -119,6 +173,10 @@ class MockHandler(BaseHTTPRequestHandler):
         （命名约定 do_ + 请求方法名），因此在项目代码里看不到显式调用者。
         匹配规则：自上而下依次精确匹配 self.path；全部未命中则返回统一的 404。
         """
+        # ⚠️ 先无条件消费请求体：保证 rfile 读指针停在下一条请求的起始位置。
+        # 不这样做的话，任何"提前 return 且没读 body"的分支都会污染 keep-alive
+        # 连接上的下一条请求（典型现象：401 变成标准库抛的 400 Bad request syntax）。
+        self._consume_body()
         # 公开注册：无需登录（和"登录后才能建用户"的后台操作区分开）
         if self.path == "/api/register":
             self._handle_register()
@@ -137,6 +195,8 @@ class MockHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         """跟上面do_POST一样"""
+        # 先消费请求体（GET 正常无 body，但与 POST 保持同一口径，防"带 body 的 GET"残留）
+        self._consume_body()
         if self.path == "/api/users":
             self._handle_list_users()
         elif self.path.startswith("/api/users/"):
@@ -151,6 +211,8 @@ class MockHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         """跟上面do_POST一样"""
+        # 先消费请求体：更新接口在"鉴权失败"时同样会提前 return
+        self._consume_body()
         if self.path.startswith("/api/users/"):
             self._handle_update_user()
 
@@ -392,7 +454,11 @@ def main():
     parser = argparse.ArgumentParser(description="本地 Mock 接口服务")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
-    # 创建服务器：监听 127.0.0.1:<port>，每个请求交给一个新的 MockHandler 实例处理
+    # 创建服务器：监听 127.0.0.1:<port>，**每条 TCP 连接**交给一个 MockHandler 实例处理。
+    # ⚠️ 注意是「每连接一个实例」，不是「每请求一个」：
+    #    socketserver 的 handle() 里是 while 循环，同一条连接上的多个请求由**同一个实例**依次处理
+    #    （HTTP/1.0 响应即关连接，循环只跑一次，所以这个差别以前看不出来）；
+    #    正因为实例会跨请求复用，请求级状态必须在 handle_one_request 里显式重置（见 _body_cache）。
     server = MockHTTPServer(("127.0.0.1", args.port), MockHandler)
     print(f"Mock 服务已启动: http://127.0.0.1:{args.port}")
     try:

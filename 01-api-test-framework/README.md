@@ -210,7 +210,7 @@ python run.py -m "not slow"
 - **缺少 `allure-pytest` 时自动降级**：报告增强不会拖垮整条流水线
 - **多环境切换落地**：`--env=test` 而非改配置硬编码，接真实环境时用例零改动
 
-> 完整接入步骤（装 Jenkins → 装插件 → 配 Allure → 建任务 → 排错 → 面试话术）见 [`docs/jenkins-ci-guide.md`](../docs/jenkins-ci-guide.md)。
+> 完整接入步骤（装 Jenkins → 装插件 → 配 Allure → 建任务 → 排错 → 面试话术）见 [`docs/jenkins-ci-guide.md`](../private-docs/jenkins-ci-guide.md)。
 
 ## 目录结构
 

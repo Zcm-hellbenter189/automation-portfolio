@@ -11,7 +11,7 @@ CASES = load_yaml(BASE_DIR / "data" / "cases.yaml")["login"]
 # 数据驱动登录用例
 @pytest.mark.parametrize("case", CASES, ids=[c.get("name","未命名用例") for c in CASES]) #ids列表推导式动态生成用例名称
 def test_login(client, case):
-    """数据驱动登录用例"""
+    """数据驱动登录管理员的用例"""
     resp = client.post("/api/login", json=case["payload"]) # 发送登录请求
     expect = case["expect"]
 

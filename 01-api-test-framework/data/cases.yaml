@@ -2,7 +2,7 @@
 # 新增用例只需在这里加一行，不需要改测试代码
 
 login:
-  - name: "正确账号密码登录成功"
+  - name: "管理员正确账号密码登录成功"
     payload:
       username: admin
       password: "123456"
@@ -30,7 +30,7 @@ login:
       code: 1002
 
 create_user:
-  - name: "正常创建后台用户(要token)"
+  - name: "正常创建管理员(要token)"
     payload:
       name: "李四"
       age: 25
@@ -45,7 +45,7 @@ create_user:
       code: 1002
 
 register_user:
-  - name: "注册用户(不要token)"
+  - name: "注册新用户(不要token)"
     unique_name: true
     payload:
       name: "王五"

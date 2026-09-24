@@ -16,7 +16,7 @@ CASES = load_yaml(BASE_DIR / "data" / "cases.yaml")["register_user"]
 # 把 CASES 逐条注入测试函数：有几条数据就展开成几条独立用例
 @pytest.mark.parametrize("case", CASES, ids=[c.get("name", "未命名用例") for c in CASES])
 def test_register_without_token(client, case):
-    """未登录（无 Authorization）也能注册成功
+    """未登录（无 Authorization）能注册新用户
 
     client 未触发 auto_login，所以不带 token——
     能注册成功恰好证明该接口是公开的（对比 POST /api/users 无 token 会返回 401）。

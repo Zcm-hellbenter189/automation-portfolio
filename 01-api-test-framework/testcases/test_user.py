@@ -16,7 +16,7 @@ def test_users_require_auth(unauth_client):
 
 @pytest.mark.parametrize("case", CREATE_CASES, ids=[c["name"] for c in CREATE_CASES])
 def test_create_user(client, auto_login, case):
-    """数据驱动创建用户用例"""
+    """数据驱动创建后台管理员用例"""
     resp = client.post("/api/users", json=case["payload"])
     expect = case["expect"]
 

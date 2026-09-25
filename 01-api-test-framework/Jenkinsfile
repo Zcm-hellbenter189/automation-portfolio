@@ -62,7 +62,10 @@ pipeline {
                  * 锁文件不存在时回退到 requirements.txt（只声明版本下限）。
                  * 锁文件由本地生成：pip install --dry-run --ignore-installed --report r.json -r requirements.txt
                  */
-                bat 'if exist requirements.lock.txt (python -m pip install -r requirements.lock.txt) else (python -m pip install -r requirements.txt)'
+                // ⚠️ 这里是 Groovy 的【单引号】字符串，${PYTHON} 不会被插值！
+                // 改用 Windows 批处理的 %PYTHON% —— Jenkins 的 environment 会把变量注入构建环境，
+                // 批处理运行时再展开，效果等价。外层加双引号是防路径含空格。
+                bat 'if exist requirements.lock.txt ("%PYTHON%" -m pip install -r requirements.lock.txt) else ("%PYTHON%" -m pip install -r requirements.txt)'
                 // Linux 节点请改用 sh
             }
         }
@@ -74,7 +77,7 @@ pipeline {
                  * 不传 -m，CI 跑全量（含 slow 标记的用例）
                  * 退出码非 0 → 本阶段自动变红，这是持续集成的关键约定
                  */
-                bat 'python run.py --env=test --ci'
+                bat '"%PYTHON%" run.py --env=test --ci'
             }
         }
     }

@@ -54,46 +54,60 @@ pipeline {
             }
         }
 
+        /* ⚠️ 工作目录：Jenkins 默认在【仓库根】执行，
+         * 而项目代码在 01-api-test-framework/ 下 —— 所以用 Jenkins 的 dir() 切进去。
+         * 为什么不用 cd：bat 步骤每次都是新的 shell，cd 不会跨步骤保留。
+         * 不切目录的后果：pip install -r requirements.txt 报
+         *   "ERROR: Could not open requirements file: No such file or directory"
+         */
         stage('Prepare') {
             steps {
-                bat "${PYTHON} --version"
-                /* 优先装"锁文件"：requirements.lock.txt 记录每个依赖的确切版本，
-                 * 保证 CI 装到的版本与开发机完全一致（消除"本地能过、CI 挂"的环境漂移）；
-                 * 锁文件不存在时回退到 requirements.txt（只声明版本下限）。
-                 * 锁文件由本地生成：pip install --dry-run --ignore-installed --report r.json -r requirements.txt
-                 */
-                // ⚠️ 这里是 Groovy 的【单引号】字符串，${PYTHON} 不会被插值！
-                // 改用 Windows 批处理的 %PYTHON% —— Jenkins 的 environment 会把变量注入构建环境，
-                // 批处理运行时再展开，效果等价。外层加双引号是防路径含空格。
-                bat 'if exist requirements.lock.txt ("%PYTHON%" -m pip install -r requirements.lock.txt) else ("%PYTHON%" -m pip install -r requirements.txt)'
-                // Linux 节点请改用 sh
+                dir('01-api-test-framework') {
+                    bat '"%PYTHON%" --version'
+                    /* 优先装"锁文件"：requirements.lock.txt 记录每个依赖的确切版本，
+                     * 保证 CI 装到的版本与开发机完全一致（消除"本地能过、CI 挂"的环境漂移）；
+                     * 锁文件不存在时回退到 requirements.txt（只声明版本下限）。
+                     * 锁文件由本地生成：pip install --dry-run --ignore-installed --report r.json -r requirements.txt
+                     */
+                    // ⚠️ 这里是 Groovy 的【单引号】字符串，${PYTHON} 不会被插值！
+                    // 改用 Windows 批处理的 %PYTHON% —— Jenkins 的 environment 会把它注入构建环境，
+                    // 批处理运行时再展开，效果等价。外层加双引号是防路径含空格。
+                    bat 'if exist requirements.lock.txt ("%PYTHON%" -m pip install -r requirements.lock.txt) else ("%PYTHON%" -m pip install -r requirements.txt)'
+                    // Linux 节点请改用 sh
+                }
             }
         }
 
         stage('API Test') {
             steps {
-                /* --ci     = --junitxml --allure，产出两种报告
-                 * --env=test  多环境切换落地：接真实环境只改 config/config.yaml，用例零改动
-                 * 不传 -m，CI 跑全量（含 slow 标记的用例）
-                 * 退出码非 0 → 本阶段自动变红，这是持续集成的关键约定
-                 */
-                bat '"%PYTHON%" run.py --env=test --ci'
+                dir('01-api-test-framework') {
+                    /* --ci     = --junitxml --allure，产出两种报告
+                     * --env=test  多环境切换落地：接真实环境只改 config/config.yaml，用例零改动
+                     * 不传 -m，CI 跑全量（含 slow 标记的用例）
+                     * 退出码非 0 → 本阶段自动变红，这是持续集成的关键约定
+                     */
+                    bat '"%PYTHON%" run.py --env=test --ci'
+                }
             }
         }
     }
 
     post {
         always {
-            /* 用例明细 + 通过率趋势图（Jenkins 任务页原生展示）
-             * allowEmptyResults：用例收集阶段就崩掉时不要连带 post 一起失败，掩盖真正的报错
-             */
-            junit allowEmptyResults: true, testResults: 'reports/junit.xml'
+            // 同样切到项目目录：报告产物都在 01-api-test-framework/reports/ 下，
+            // 这里的相对路径是相对 workspace 根的，不切目录会找不到文件
+            dir('01-api-test-framework') {
+                /* 用例明细 + 通过率趋势图（Jenkins 任务页原生展示）
+                 * allowEmptyResults：用例收集阶段就崩掉时不要连带 post 一起失败，掩盖真正的报错
+                 */
+                junit allowEmptyResults: true, testResults: 'reports/junit.xml'
 
-            // Allure 报告（需 Allure Jenkins Plugin；缺插件此步会报错，装好即可）
-            allure includeProperties: false, jdk: '', results: [[path: 'reports/allure-results']]
+                // Allure 报告（需 Allure Jenkins Plugin；缺插件此步会报错，装好即可）
+                allure includeProperties: false, jdk: '', results: [[path: 'reports/allure-results']]
 
-            // HTML 报告归档，便于下载取证
-            archiveArtifacts artifacts: 'reports/report.html', allowEmptyArchive: true
+                // HTML 报告归档，便于下载取证
+                archiveArtifacts artifacts: 'reports/report.html', allowEmptyArchive: true
+            }
         }
 
         failure {

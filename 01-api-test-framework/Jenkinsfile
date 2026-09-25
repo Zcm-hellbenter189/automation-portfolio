@@ -38,6 +38,7 @@ pipeline {
     }
 
     environment {
+        PYTHON = 'E:/ruanjian/Learn/WorkBuddy/automation-portfolio/.venv/Scripts/python.exe'
         PYTHONIOENCODING = 'utf-8'       // Windows 控制台输出中文必需，否则报告里是乱码
         PYTHONUNBUFFERED = '1'           // 日志实时刷出，不要等缓冲区满
     }
@@ -55,7 +56,7 @@ pipeline {
 
         stage('Prepare') {
             steps {
-                bat 'python --version'
+                bat "${PYTHON} --version"
                 /* 优先装"锁文件"：requirements.lock.txt 记录每个依赖的确切版本，
                  * 保证 CI 装到的版本与开发机完全一致（消除"本地能过、CI 挂"的环境漂移）；
                  * 锁文件不存在时回退到 requirements.txt（只声明版本下限）。

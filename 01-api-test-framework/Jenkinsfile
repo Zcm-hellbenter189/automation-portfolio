@@ -43,16 +43,17 @@ pipeline {
     }
 
     stages {
-        stage('拉取代码') {
+        stage('Checkout') {
             steps {
-                checkout scm
+                // 无需 checkout scm：Pipeline script from SCM 模式下，Jenkins 已在
+                // 「Declarative: Checkout SCM」阶段自动拉取过代码，此处再 checkout 属于重复拉取
                 // 打印本次构建对应的提交号：用例挂了能立刻定位是哪个 commit 引入的
                 bat 'git rev-parse --short HEAD'
                 // Linux 节点请改用： sh 'git rev-parse --short HEAD'
             }
         }
 
-        stage('准备环境') {
+        stage('Prepare') {
             steps {
                 bat 'python --version'
                 /* 优先装"锁文件"：requirements.lock.txt 记录每个依赖的确切版本，
@@ -65,7 +66,7 @@ pipeline {
             }
         }
 
-        stage('接口自动化测试') {
+        stage('API Test') {
             steps {
                 /* --ci     = --junitxml --allure，产出两种报告
                  * --env=test  多环境切换落地：接真实环境只改 config/config.yaml，用例零改动
@@ -92,7 +93,7 @@ pipeline {
         }
 
         failure {
-            echo '接口自动化测试失败，请查看本次构建的 Allure 报告定位失败用例'
+            echo 'API tests failed, check the Allure report for details'
             /* 邮件通知示例（需 Email Extension Plugin + 系统 SMTP 配置）：
              * emailext to: 'you@example.com',
              *          subject: "接口自动化失败: ${env.JOB_NAME} #${env.BUILD_NUMBER}",

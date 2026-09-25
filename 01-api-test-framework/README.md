@@ -184,6 +184,35 @@ reports/report.html
 [*] 测试报告已生成: ...\reports\report.html
 ```
 
+## 测试报告
+
+三套报告，用途不同：
+
+| 报告 | 生成方式 | 特点 |
+|---|---|---|
+| **HTML 报告** | `python run.py` | pytest-html，**自包含单文件，双击即可打开** |
+| **JUnit XML** | `python run.py --junitxml` | 结构化结果，给 CI 画通过率趋势 |
+| **Allure 报告** | `python run.py --allure` | **分层用例 + 步骤 + 附件**，最详细 |
+
+### 看 Allure 报告
+
+**依赖**：`allure-pytest`（Python 侧，已在 `requirements.txt`）+ **Allure 命令行**（需 Java 11+）。
+
+> 只装了 Python 插件、没装命令行时，`run.py` 会**自动降级跳过渲染**（用例照常执行），只在终端提示一句。
+
+```bash
+# ① 跑用例并生成报告（内部：清空旧结果 → 收集 → 渲染到 reports/allure-report）
+python run.py --allure
+
+# ② 打开报告
+allure open reports/allure-report
+```
+
+> ⚠️ **别双击 `reports/allure-report/index.html`** —— Allure 是「纯前端页面 + 异步加载 JSON」，用 `file://` 打开时浏览器**同源策略会阻止 JS 读取本地 JSON**，页面会空白。
+> **必须通过 HTTP 访问**：`allure open <已生成的报告>`，或 `allure serve reports/allure-results`（后者不用先 generate，最快）。
+
+**CI 侧**：Jenkins 用 **Allure 插件**渲染（插件自带运行时，节点上**不需要**装命令行）—— 见 `Jenkinsfile`。
+
 ## 持续集成（CI）
 
 把「手动跑用例」升级为「持续测试」：仓库自带 `Jenkinsfile`，定时自动执行全量用例并产出报告。
@@ -210,7 +239,7 @@ python run.py -m "not slow"
 - **缺少 `allure-pytest` 时自动降级**：报告增强不会拖垮整条流水线
 - **多环境切换落地**：`--env=test` 而非改配置硬编码，接真实环境时用例零改动
 
-> 完整接入步骤（装 Jenkins → 装插件 → 配 Allure → 建任务 → 排错 → 面试话术）见 [`docs/jenkins-ci-guide.md`](../private-docs/jenkins-ci-guide.md)。
+> 接入步骤（装 Jenkins → 装插件 → 配 Allure → 建任务 → 排错）见 [`Jenkinsfile`](Jenkinsfile) 中 `stages` 的逐步注释，以及上方「测试报告」一节。
 
 ## 目录结构
 
@@ -235,6 +264,19 @@ python run.py -m "not slow"
 ├── testcases/             用例层（auth / register / user / order 依赖链）
 └── reports/               运行产物：HTML / JUnit XML / Allure 结果（git 忽略）
 ```
+
+## 延伸阅读
+
+`docs/` 目录下是本项目的过程记录与深度分析（都是实际问题驱动，不是教科书笔记）：
+
+| 文档 | 内容 |
+|---|---|
+| [`keepalive-body-pollution.md`](../docs/keepalive-body-pollution.md) | HTTP/1.1 长连接下「请求体残留」导致请求错位：一次协议升级引发两个缺陷，以及怎么被自动化用例抓住 |
+| [`performance-test-01-jmeter.md`](../docs/performance-test-01-jmeter.md) | JMeter 性能测试实战：连接层 → 因果链 → 数据量退化，三轮修复 + 两次发现「测量工具本身在骗人」 |
+| [`jmeter-01-quickstart.md`](../docs/jmeter-01-quickstart.md) | JMeter 上手速查（元件作用域、关联、断言、JTL 字段） |
+| [`idempotency-analysis.md`](../docs/idempotency-analysis.md) | 幂等性分析：**去重 ≠ 幂等** |
+| [`concurrency-test-verification-01.md`](../docs/concurrency-test-verification-01.md) | 并发用例验证：怎么写出「真的能抓到竞态」的用例 |
+| [`01-notes-request-flow.md`](../docs/01-notes-request-flow.md) | 一次请求从客户端到 Mock 服务的完整流转笔记 |
 
 ## 简历亮点
 

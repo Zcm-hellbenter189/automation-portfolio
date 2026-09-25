@@ -15,7 +15,7 @@
  * 前置条件：Jenkins 节点已安装 Python 3.10+，且能成功执行
  *          pip install -r requirements.lock.txt（锁文件缺失时回退到 requirements.txt）
  *
- * 详细接入步骤（从装 Jenkins 到看报告）见 docs/jenkins-ci-guide.md
+ * 详细接入步骤（从装 Jenkins 到看报告）见 01-api-test-framework/README.md 的「持续集成」与「测试报告」两节
  * ============================================================================= */
 pipeline {
     agent any

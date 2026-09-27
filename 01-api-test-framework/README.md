@@ -215,7 +215,8 @@ allure open reports/allure-report
 
 ## 持续集成（CI）
 
-把「手动跑用例」升级为「持续测试」：仓库自带 `Jenkinsfile`，定时自动执行全量用例并产出报告。
+把「手动跑用例」升级为「持续测试」：仓库自带 `Jenkinsfile`，**已在本地 Jenkins 上实际跑通**——
+拉代码 → 装依赖 → 起 Mock 服务 → 执行全量用例 → 产出 JUnit + Allure 报告 → 归档，**18/18 通过、构建绿**。
 
 ```bash
 # 本地模拟 CI 行为（产出 JUnit XML + Allure 结果）
@@ -239,7 +240,8 @@ python run.py -m "not slow"
 - **缺少 `allure-pytest` 时自动降级**：报告增强不会拖垮整条流水线
 - **多环境切换落地**：`--env=test` 而非改配置硬编码，接真实环境时用例零改动
 
-> 接入步骤（装 Jenkins → 装插件 → 配 Allure → 建任务 → 排错）见 [`Jenkinsfile`](Jenkinsfile) 中 `stages` 的逐步注释，以及上方「测试报告」一节。
+> **完整接入步骤**（装 Jenkins → 装插件 → 配 Allure → 建任务 → 失败通知 → 排错手册 → **实战踩坑记录**）
+> 见 [`docs/jenkins-ci-guide.md`](../docs/jenkins-ci-guide.md)。
 
 ## 目录结构
 
@@ -277,6 +279,7 @@ python run.py -m "not slow"
 | [`idempotency-analysis.md`](../docs/idempotency-analysis.md) | 幂等性分析：**去重 ≠ 幂等** |
 | [`concurrency-test-verification-01.md`](../docs/concurrency-test-verification-01.md) | 并发用例验证：怎么写出「真的能抓到竞态」的用例 |
 | [`01-notes-request-flow.md`](../docs/01-notes-request-flow.md) | 一次请求从客户端到 Mock 服务的完整流转笔记 |
+| [`jenkins-ci-guide.md`](../docs/jenkins-ci-guide.md) | **Jenkins CI 接入全流程**：从装 Jenkins 到失败通知，附**实战踩坑记录**（10 个真实坑与解法） |
 
 ## 简历亮点
 

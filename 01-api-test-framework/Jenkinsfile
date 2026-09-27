@@ -27,14 +27,25 @@ pipeline {
         disableConcurrentBuilds()                           // 同任务串行，避免抢 Mock 端口
     }
 
-    /* 触发方式（三选一，默认用定时）：
+    /* 触发方式（可组合：多个触发器之间是「或」关系，任一满足即触发一次构建）：
+     * 本任务同时启用 cron + pollSCM，职责互补：pollSCM 管"提交即跑"（快速反馈），
+     * cron 管"到点必跑"（夜间兜底，避免长期不提交就永远不跑）。
+     *
+     * ⚠️ 本项目 Webhook 走不通：Jenkins 跑在本机、无公网可达地址，
+     *    GitHub/Gitee 的回调请求打不进来 ⇒ 感知代码变更只能靠 pollSCM。
+     * ⚠️ pollSCM 只轮询【任务里配置的那一个仓库 URL】：本项目 Jenkins 从 Gitee 拉代码，
+     *    只推 GitHub(origin) 等于没推，Jenkins 看不到变化 ⇒ 必须 pushall 两边都推。
+     * 注意：两个触发源不会互相合并，同一份提交可能被跑两次（第二次算夜间复跑，可当 flaky用例探测）。
+     *
+     * 三种触发器的含义：
      *   cron        Jenkins 的 cron 语法；H 表示"散列"到某个分钟，避免整点抢资源
-     *   pollSCM     兜底方案：轮询 Git 仓库，有变更就跑（不依赖 Webhook 配置）
-     *   Webhook     在 GitHub 仓库 Settings → Webhooks 指向 <jenkins>/github-webhook/
+     *   pollSCM     轮询 Git 仓库，有变更就跑（本项目唯一可行的变更触发方式）
+     *   Webhook     在仓库 Settings → Webhooks 指向 <jenkins>/github-webhook/（本项目不可用，见上）
      */
     triggers {
+        //	H是 Jenkins 专有的:散列出来的固定某一分钟（0–59 之一）
         cron('H 2 * * *')                // 每天凌晨 2 点左右自动跑一次
-        // pollSCM('H/15 * * * *')       // 兜底：每约 15 分钟检查一次代码变更
+        pollSCM('H/15 * * * *')          // 每约 15 分钟检查一次代码变更（H/15 = 先散列偏移再每 15 分钟）
     }
 
     environment {

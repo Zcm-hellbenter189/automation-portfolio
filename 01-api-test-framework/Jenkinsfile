@@ -15,7 +15,7 @@
  * 前置条件：Jenkins 节点已安装 Python 3.10+，且能成功执行
  *          pip install -r requirements.lock.txt（锁文件缺失时回退到 requirements.txt）
  *
- * 详细接入步骤（从装 Jenkins 到看报告）见 01-api-test-framework/README.md 的「持续集成」与「测试报告」两节
+ * 详细接入步骤（从装 Jenkins 到看报告、排错、实战踩坑记录）见 docs/jenkins-ci-guide.md
  * ============================================================================= */
 pipeline {
     agent any
@@ -123,7 +123,19 @@ pipeline {
 
         failure {
             echo 'API tests failed, check the Allure report for details'
-            /* 邮件通知示例（需 Email Extension Plugin + 系统 SMTP 配置）：
+
+            /* 企业微信机器人通知。
+             * key 通过环境变量 WECOM_WEBHOOK_KEY 注入（Jenkins 全局环境变量，或更安全的「凭据」），
+             * **不要写进仓库**；未配置时 notify.py 会静默跳过。
+             * notify.py 内部吞掉所有异常并返回 0 —— 通知失败不该让构建「更红」。
+             */
+            dir('01-api-test-framework') {
+                withCredentials([string(credentialsId: 'wecom-webhook-key', variable: 'WECOM_WEBHOOK_KEY')]) {
+                    bat '"%PYTHON%" scripts/notify.py'
+                }
+            }
+
+            /* 邮件通知示例（可选，需 Email Extension Plugin + 系统 SMTP 配置）：
              * emailext to: 'you@example.com',
              *          subject: "接口自动化失败: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
              *          body: "构建地址: ${env.BUILD_URL}\n请查看 Allure 报告中的失败用例。"

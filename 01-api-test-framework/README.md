@@ -7,11 +7,54 @@
 - **分层架构**：`core`（封装）/ `testcases`（用例）/ `data`（数据）/ `config`（配置）四层分离，工程化规范
 - **接口依赖传递**：登录取 token → 创建用户取 id → 下单，变量池自动流转（接口自动化的核心难点）
 - **数据驱动**：yaml 管理用例数据，一条数据一个用例，新增用例不写代码
-- **统一断言库**：HTTP 状态码 + 业务 code + JSON 字段 + 字段类型 + 响应耗时，全维度校验
+- **统一断言库**：HTTP 状态码 + 业务码 + JSON 字段 + 字段类型 + 必填字段 + 响应耗时，全维度校验
 - **多环境切换**：`pytest --env=dev/test/prod` 一键切换，接入真实环境只需改配置
-- **失败重试 + 超时控制**：网络抖动自动指数退避重试，不误报
+- **幂等重试 + 超时控制**：仅**幂等方法**（GET/HEAD/OPTIONS/TRACE/PUT/DELETE）自动指数退避重试；
+  **POST 默认只发一次** —— 避免"请求其实到了、只是响应丢了"时重试造成重复创建数据
 - **自带 Mock 服务**：纯标准库实现，任何环境 clone 下来即可跑通
 - **一键运行**：`python run.py` 自动起服务、跑用例、出 HTML 报告
+
+## 接口与业务码
+
+Mock 服务提供 9 个接口，覆盖 REST 风格的基础操作与两类特殊场景（慢响应 / 恒 500）：
+
+| 方法 | 路径 | 鉴权 | 说明 |
+|---|---|---|---|
+| `POST` | `/api/register` | ❌ | 公开注册 |
+| `POST` | `/api/login` | ❌ | 登录，成功返回 token |
+| `GET` | `/api/users` | ✅ | 用户列表 |
+| `POST` | `/api/users` | ✅ | 创建用户 |
+| `GET` | `/api/users/{id}` | ✅ | 查询单个用户 |
+| `PUT` | `/api/users/{id}` | ✅ | 全量更新用户（`name`/`age` 均必填） |
+| `POST` | `/api/orders` | ✅ | 下单（依赖已存在的 `user_id`） |
+| `GET` | `/api/slow` | ❌ | 固定 3 秒（演示响应时间断言） |
+| `GET` | `/api/error` | ❌ | 固定 500（演示异常场景） |
+
+**业务码**（响应体里的 `code` 字段）：
+
+| 业务码 | 含义 | 配套 HTTP | 出现场景 |
+|---|---|---|---|
+| `0` | 成功 | `200` | 所有成功响应 |
+| `1001` | 未登录 / 用户名或密码错误 | `401` | 登录失败；需鉴权接口未携带合法 token |
+| `1002` | 参数缺失或格式错误 | `400` | 缺字段、id 非数字、`name` 为空 |
+| `1003` | 用户不存在 | `404` | 查询 / 更新单个用户 |
+| `1004` | 接口不存在 | `404` | 未匹配到任何路由 |
+| `1005` | 用户不存在，无法下单 | `400` | `POST /api/orders` |
+| `1006` | 用户名已存在 | `400` | 重复注册 |
+| `5000` | 服务器内部错误 | `500` | `/api/error` |
+
+> ⚠️ **权威定义处是 [`mock_server.py`](mock_server.py) 的模块 docstring**（业务码就定义在那里）。
+> 本表仅为便于阅读，可能存在滞后 —— 有疑问时以代码为准。
+
+**已知契约瑕疵（如实记录，暂不修改）**：
+
+- **`1003` 与 `1005` 语义重复**：都表示"用户不存在"，但配套 HTTP 状态不同（`404` / `400`）；
+- **`1001` 一码多义**：同时表示"密码错误"与"未登录"；
+- **`1002` 一码多义**：同时表示"缺参数"与"格式错误"。
+
+> **为什么不改**：修改需要同步改动 5 处服务端发送点与 2 条用例断言，而收益仅为"契约更整洁"，
+> 在封版阶段不划算。**但如实记录比假装没看见更有价值** —— 这也是写接口文档的真正意义：
+> **它会逼你用"客户端视角"重新审视一遍契约**，把 review 时容易滑过的不一致照出来。
 
 ## 环境要求
 
@@ -147,41 +190,56 @@ setx PYTHONUTF8 1 （新开终端可能会设置失败（仍然取旧的环境�
 
 ## 快速开始
 
-```bash
-# 1. 创建虚拟环境（任选其一）
+> ⚠️ **虚拟环境在「仓库根」，不在本目录** —— 三个子项目共用同一套 `.venv`（见上方「环境准备」）。
+> 下面统一用 `..\.venv\Scripts\python.exe` 调用；**若你已激活过 venv**，也可以直接简写成 `python`。
+
+```bat
+:: 0. 首次准备（在【仓库根】执行一次即可）
+cd /d e:\ruanjian\Learn\WorkBuddy\automation-portfolio
 python -m venv .venv
-# Windows 激活
 .venv\Scripts\activate
-# 2. 安装依赖
-pip install -r requirements.txt
-# 3. 【最常用】一键全跑（自动起 mock、跑用例、出报告）
-python run.py
-# 手工跑（需先开 mock）
-python mock_server.py --port 8000     # 终端 A
-pytest -m "not slow"                  # 终端 B：跳过慢用例，日常提速
-pytest -m slow                        # 只跑慢用例
-pytest testcases/test_auth.py         # 只跑单个文件
-pytest testcases/test_auth.py -k "login"   # 按名称过滤
-pytest --env=test                     # 切换环境
-pytest -v                             # 看每条用例名
-pytest --collect-only -q              # 只收集不执行（查用例总数）
+pip install -r 01-api-test-framework\requirements.txt
 
-# 自定义端口（被占用时 run.py 也会自动换）
-python run.py --port 9000
+:: ── 以下命令都在 01-api-test-framework 目录下执行 ──
+cd 01-api-test-framework
 
-跑完看两处：终端底部「测试结果摘要」（通过率）、`reports/report.html`（逐条明细）。
-# 4. 打开测试报告
-reports/report.html
+:: 1.【最常用】一键全跑（自动起 mock → 跑用例 → 出报告）
+..\.venv\Scripts\python.exe run.py
+
+:: 2. 手工跑（需先开 mock 服务）
+..\.venv\Scripts\python.exe mock_server.py --port 8000      :: 终端 A
+..\.venv\Scripts\python.exe -m pytest -m "not slow"         :: 终端 B：跳过慢用例，日常提速
+
+:: 3. 常用筛选
+..\.venv\Scripts\python.exe -m pytest -m slow                        :: 只跑慢用例
+..\.venv\Scripts\python.exe -m pytest testcases/test_auth.py         :: 只跑单个文件
+..\.venv\Scripts\python.exe -m pytest testcases/test_auth.py -k login :: 按名称过滤
+..\.venv\Scripts\python.exe -m pytest --env=test                     :: 切换环境
+..\.venv\Scripts\python.exe -m pytest -v                             :: 看每条用例名
+..\.venv\Scripts\python.exe -m pytest --collect-only -q               :: 只收集不执行（查用例总数）
+
+:: 4. 自定义端口（8000 被占用时 run.py 也会自动换）
+..\.venv\Scripts\python.exe run.py --port 9000
 ```
+
+**跑完看两处**：终端底部的「测试结果摘要」（通过率）+ `reports/report.html`（逐条明细，双击打开）。
 
 ## 运行效果
 
 ```
 [*] Mock 服务已启动: http://127.0.0.1:8000
+[*] 运行环境: dev | Mock 端口: 8000
 [*] 开始执行测试用例 ...
-..............                                      [100%]
+
+....................                                                      [100%]
+                              ↑ 20 条用例 = 20 个点
+
+收集用例数: 20（其中未选中 0）
+通过      : 20 ✅    失败: 0    通过率: 100.0%  ✅ 全部通过
+
 [*] pytest 退出码: 0
-[*] 测试报告已生成: ...\reports\report.html
+[*] HTML 报告  : ...\reports\report.html
+[*] Mock 服务已关闭
 ```
 
 ## 测试报告
@@ -216,7 +274,7 @@ allure open reports/allure-report
 ## 持续集成（CI）
 
 把「手动跑用例」升级为「持续测试」：仓库自带 `Jenkinsfile`，**已在本地 Jenkins 上实际跑通**——
-拉代码 → 装依赖 → 起 Mock 服务 → 执行全量用例 → 产出 JUnit + Allure 报告 → 归档，**18/18 通过、构建绿**。
+拉代码 → 装依赖 → 起 Mock 服务 → 执行全量用例 → 产出 JUnit + Allure 报告 → 归档，**20/20 通过、构建绿**。
 
 ```bash
 # 本地模拟 CI 行为（产出 JUnit XML + Allure 结果）
@@ -250,7 +308,7 @@ python run.py -m "not slow"
 ├── run.py                 一键运行入口（起 mock → 跑 pytest → 出报告，支持 --ci）
 ├── Jenkinsfile            CI 流水线定义（拉代码 → 装依赖 → 执行用例 → 归档报告）
 ├── mock_server.py         本地 Mock 接口服务（纯标准库，零依赖）
-├── conftest.py            pytest 夹具：client / variables / auto_login
+├── conftest.py            pytest 夹具：env / client / unauth_client / auto_login / created_user
 ├── pytest.ini             pytest 配置
 ├── requirements.txt       依赖声明（版本下限；含中文注释，必须保持 UTF-8 BOM）
 ├── requirements.lock.txt  依赖锁文件（确切版本，CI 用它复现环境；纯 ASCII 注释）
@@ -258,12 +316,17 @@ python run.py -m "not slow"
 │   ├── config.yaml
 │   └── loader.py
 ├── core/                  框架核心封装
-│   ├── http_client.py     Session 封装：token 注入/超时/重试/日志
+│   ├── http_client.py     Session 封装：token 注入/超时/幂等重试（POST 不重试）/日志脱敏
 │   ├── assertions.py      统一断言库
 │   └── extractor.py       响应提取 + 变量池（接口依赖传递）
 ├── utils/                 日志 / 数据读取
 ├── data/cases.yaml        数据驱动用例数据
 ├── testcases/             用例层（auth / register / user / order 依赖链）
+├── scripts/notify.py      构建失败时推送企业微信机器人（由 Jenkinsfile 的 failure 块调用）
+├── perf/                  性能测试资产
+│   ├── README.md          压测三轮修复的完整记录
+│   ├── gil_demo.py        GIL 对并发影响的对照实验
+│   └── jmeter/login-flow.jmx   JMeter 业务流计划（4 事务）
 └── reports/               运行产物：HTML / JUnit XML / Allure 结果（git 忽略）
 ```
 
@@ -273,16 +336,16 @@ python run.py -m "not slow"
 
 | 文档 | 内容 |
 |---|---|
-| [`keepalive-body-pollution.md`](../docs/keepalive-body-pollution.md) | HTTP/1.1 长连接下「请求体残留」导致请求错位：一次协议升级引发两个缺陷，以及怎么被自动化用例抓住 |
+| [`keepalive-body-pollution.md`](../docs/keepalive-body-pollution.md) | HTTP/1.1 长连接下「请求体残留」导致请求错位：一次协议升级引发两个缺陷，以及怎么被自动化用例抓住（**含已落地的回归用例与变异自检结果**） |
 | [`performance-test-01-jmeter.md`](../docs/performance-test-01-jmeter.md) | JMeter 性能测试实战：连接层 → 因果链 → 数据量退化，三轮修复 + 两次发现「测量工具本身在骗人」 |
 | [`jmeter-01-quickstart.md`](../docs/jmeter-01-quickstart.md) | JMeter 上手速查（元件作用域、关联、断言、JTL 字段） |
 | [`idempotency-analysis.md`](../docs/idempotency-analysis.md) | 幂等性分析：**去重 ≠ 幂等** |
 | [`concurrency-test-verification-01.md`](../docs/concurrency-test-verification-01.md) | 并发用例验证：怎么写出「真的能抓到竞态」的用例 |
 | [`01-notes-request-flow.md`](../docs/01-notes-request-flow.md) | 一次请求从客户端到 Mock 服务的完整流转笔记 |
-| [`jenkins-ci-guide.md`](../docs/jenkins-ci-guide.md) | **Jenkins CI 接入全流程**：从装 Jenkins 到失败通知，附**实战踩坑记录**（10 个真实坑与解法） |
+| [`jenkins-ci-guide.md`](../docs/jenkins-ci-guide.md) | **Jenkins CI 接入全流程**：从装 Jenkins 到失败通知，附**实战踩坑记录**（17 个真实坑与解法） |
 
 ## 简历亮点
 
-> 独立设计并实现接口自动化测试框架：基于 Requests + Pytest，支持数据驱动、多环境切换、接口依赖传递（变量池）、统一断言与性能断言；封装 HTTP 客户端实现鉴权注入、超时控制与指数退避重试；集成 pytest-html 报告与一键运行脚本，实现「clone 即跑」，覆盖登录鉴权、CRUD、业务异常、性能等 15+ 用例场景。
+> 独立设计并实现接口自动化测试框架：基于 Requests + Pytest，支持数据驱动、多环境切换、接口依赖传递（变量池）、统一断言与性能断言；封装 HTTP 客户端实现鉴权注入、超时控制与**按方法区分的重试策略**（仅幂等方法自动重试，避免 POST 重放）；集成 pytest-html 报告与一键运行脚本，实现「clone 即跑」，覆盖登录鉴权、CRUD、业务异常、并发、性能等 20 条用例场景。
 >
 > **持续集成实践**：基于 Declarative Pipeline 搭建 Jenkins 流水线，实现「拉代码 → 装依赖 → 执行全量用例 → 归档报告」自动化，支持定时与提交触发；集成 Allure + JUnit 双报告体系并保留历史通过率趋势；通过退出码传递保证「用例失败即构建失败」，慢用例用 pytest marker 隔离实现日常/CI 执行策略分离。

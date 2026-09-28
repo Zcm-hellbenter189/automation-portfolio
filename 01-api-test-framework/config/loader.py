@@ -3,7 +3,9 @@
 设计要点:
   - config.yaml 只在首次访问时解析一次并缓存（lru_cache），
     load_config / load_login 不再各自重复 open + safe_load；
-  - 返回值一律 dict 拷贝，调用方修改不会污染缓存，也不会串到其他环境。
+  - 返回值是 dict **浅拷贝**（`dict(raw[env])`）：改顶层键不会污染缓存，
+    ⚠️ 但**嵌套结构仍与缓存共享引用** —— 例如 `cfg["headers"]["X"] = "y"`
+    会**直接改到缓存**。要安全地改嵌套字段，请先 `copy.deepcopy`。
 """
 import os
 from functools import lru_cache
@@ -41,6 +43,9 @@ def load_config(env: str = "dev") -> dict:
 
 
 def load_login() -> dict:
-    """加载登录依赖的默认账号（拷贝返回，防调用方污染缓存）"""
+    """加载登录依赖的默认账号
+
+    返回 `dict` **浅拷贝**，防止调用方修改顶层键时污染 `lru_cache` 里的缓存对象。
+    """
     return dict(_raw_config().get("login", {}))
 

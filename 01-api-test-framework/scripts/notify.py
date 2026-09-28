@@ -55,6 +55,14 @@ def send_wecom(content: str, key: str) -> None:
 
 
 def main() -> int:
+    """读取环境变量 → 拼装消息 → 发送。**无论成败都返回 0**
+
+    :return: 恒为 0 —— 通知失败绝不能让构建"更红"
+
+    环境变量：
+      - `WECOM_WEBHOOK_KEY`（必需；缺失则打印一行提示后直接返回）
+      - `JOB_NAME` / `BUILD_NUMBER` / `BUILD_URL`（Jenkins 自动注入，用于拼消息）
+    """
     key = os.environ.get("WECOM_WEBHOOK_KEY", "").strip()
     if not key:
         logger.info("未配置 WECOM_WEBHOOK_KEY，跳过企业微信通知")

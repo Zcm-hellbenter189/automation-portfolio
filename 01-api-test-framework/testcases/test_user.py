@@ -1,4 +1,4 @@
-"""用户接口用例：鉴权校验、CRUD、边界场景、慢响应"""
+"""用户接口用例：鉴权校验、增查改（CRU —— Mock 未实现 DELETE）、边界场景、慢响应"""
 import pytest
 
 from core import assertions
@@ -16,7 +16,7 @@ def test_users_require_auth(unauth_client):
 
 @pytest.mark.parametrize("case", CREATE_CASES, ids=[c["name"] for c in CREATE_CASES])
 def test_create_user(client, auto_login, case):
-    """数据驱动创建后台管理员用例"""
+    """数据驱动创建用户用例（参数集里同时含正向与"缺少姓名"负向）"""
     resp = client.post("/api/users", json=case["payload"])
     expect = case["expect"]
 
@@ -56,7 +56,7 @@ def test_slow_api_within_timeout(client, auto_login):
     assertions.assert_elapsed_less_than(resp, 10)
 
 def test_update_user_success(client,created_user):
-    """PUT 更新用户：响应回显 + 二次查询，双重验证""
+    """PUT 更新用户：响应回显 + 二次查询，双重验证
 
     三个设计点：
     1) 为什么用 created_user，而不是共享的夹具数据？

@@ -10,10 +10,14 @@
  *   3. Script Path 填本文件的相对路径（如 01-api-test-framework/Jenkinsfile）。
  *
  * 依赖插件：Git（默认自带）、Pipeline（默认自带）、
- *          Allure Jenkins Plugin（必需，渲染报告）、Timestamper（可选，日志时间戳）、
+ *          Allure Jenkins Plugin（必需，渲染报告）、
+ *          Timestamper（**必需** —— options 里已启用 timestamps()，缺插件会在解析期直接失败）、
  *          Email Extension Plugin（可选，失败邮件通知）
- * 前置条件：Jenkins 节点已安装 Python 3.10+，且能成功执行
- *          pip install -r requirements.lock.txt（锁文件缺失时回退到 requirements.txt）
+ * 前置条件：Jenkins 节点需有可用的 Python 3.10+ 解释器（依赖由流水线自动安装）。
+ *          ⚠️ 本文件 environment.PYTHON 写的是**本机绝对路径**（含 .venv）——
+ *            迁移到其他机器/节点时**必须修改该值**，光"装了 Python"是不够的。
+ *          依赖安装优先用锁文件：pip install -r requirements.lock.txt
+ *          （锁文件缺失时回退 requirements.txt）
  *
  * 详细接入步骤（从装 Jenkins 到看报告、排错、实战踩坑记录）见 docs/jenkins-ci-guide.md
  * ============================================================================= */
@@ -125,8 +129,13 @@ pipeline {
             echo 'API tests failed, check the Allure report for details'
 
             /* 企业微信机器人通知。
-             * key 通过环境变量 WECOM_WEBHOOK_KEY 注入（Jenkins 全局环境变量，或更安全的「凭据」），
-             * **不要写进仓库**；未配置时 notify.py 会静默跳过。
+             * key 通过环境变量 WECOM_WEBHOOK_KEY 注入，**不要写进仓库**。
+             *
+             * ⚠️ 前置：必须先在 Jenkins 里创建 ID 为 `wecom-webhook-key` 的 **Secret text** 凭据。
+             *    否则 withCredentials 会直接抛 CredentialNotFoundException 让 failure 块失败
+             *    （**不是**"静默跳过"）。创建步骤见 docs/jenkins-ci-guide.md。
+             *    只有"key 没能注入到脚本"这种情况，notify.py 才会打印提示并静默跳过。
+             *
              * notify.py 内部吞掉所有异常并返回 0 —— 通知失败不该让构建「更红」。
              */
             dir('01-api-test-framework') {

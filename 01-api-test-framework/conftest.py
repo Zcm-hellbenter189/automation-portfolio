@@ -1,13 +1,18 @@
-"""pytest 全局夹具：
+"""pytest 全局夹具与 hook：
+
+夹具（5 个）：
   - env             --env 参数（dev/test/prod）
   - client          按 --env 配置创建的 HTTP 客户端（session 级，复用连接）
   - unauth_client   未登录客户端（负向鉴权用例用，遵守 --env 配置）
   - auto_login      session 级自动登录 + 准备依赖数据（token / user_id）
   - created_user    每用例独立创建用户（消除用例间隐式顺序耦合）
 
-会话预检（pytest_configure）：
-  - 跑用例前先探测接口服务是否可达；不可达就输出一句人话提示并中止，
-    而不是让 requests/urllib3 抛出 60+ 行的 ConnectionRefusedError 栈。
+pytest hook（3 个，均由框架自动调用）：
+  - pytest_configure        会话开始前的**服务可达性预检**：不可达就输出一句人话提示并中止，
+                            而不是让 requests/urllib3 抛出 60+ 行的 ConnectionRefusedError 栈
+                            （`--collect-only` 或 `SKIP_SERVICE_CHECK=1` 时跳过）
+  - pytest_addoption        注册自定义参数 `--env`
+  - pytest_terminal_summary 会话结束时打印「测试结果摘要」（通过率等）
 """
 import os
 import socket
@@ -21,7 +26,10 @@ from core.extractor import VariablePool, extract_variables
 from core.http_client import HttpClient, logger
 from utils.logger import get_logger
 
-# 与 client / unauth_client 夹具的兜底默认值保持一致
+# 客户端夹具在配置缺失时的兜底地址。
+# ⚠️ 注意：目前 client / unauth_client 里直接写的是字面量 "http://127.0.0.1:8000"，
+#    与本常量**取值相同但并未引用它** —— 只改这里不会影响那两个夹具。
+#    （若想统一，把两处改成 cfg.get("base_url", DEFAULT_BASE_URL) 即可。）
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 
 
@@ -78,6 +86,11 @@ def pytest_configure(config):
 
 
 def pytest_addoption(parser):
+    """注册自定义命令行参数 `--env`（pytest 的 hook，由框架自动调用）
+
+    注册后才能写 `pytest --env=test`；取值处见下方 `env` 夹具
+    （`request.config.getoption("--env")`）。
+    """
     parser.addoption(
         "--env", action="store", default="dev",
         help="运行环境，取 config.yaml 顶层 key（默认 dev；拼错会在用例收集/装配时报错）",
@@ -100,6 +113,12 @@ def env(request):
 
 @pytest.fixture(scope="session")
 def client(env):
+    """按 `--env` 配置创建的 HTTP 客户端（**session 级共享**，整轮复用一条连接）
+
+    它的 token 由 `auto_login` 夹具在登录成功后注入（`client.token = token`）；
+    因为是 session 级，这份 token 会被后续所有用例共享 ——
+    需要"未登录"视角的用例请改用 `unauth_client`。
+    """
     cfg = load_config(env)
     return HttpClient(
         base_url=cfg.get("base_url", "http://127.0.0.1:8000"),
@@ -141,7 +160,7 @@ def auto_login(client):
     )
     token = extract_variables(resp, {"token": "data.token"})["token"]
     assert token, f"登录响应缺少 token: {resp.text[:200]}"
-    client.token = token #副作用：为每个调用auto_login的用例设置token
+    client.token = token  # 副作用：为共享的 session 级 client 注入 token（后续用例自动带上）
     pool.set("token", token) # 把 token 存入变量池
 
     # 准备一个依赖用户（user_id），供「下单依赖链」用例使用

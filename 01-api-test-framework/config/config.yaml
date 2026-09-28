@@ -5,6 +5,9 @@
 dev:
   base_url: "http://127.0.0.1:8000"
   timeout: 10
+  # ⚠️ retry_times 只对「幂等方法」生效（GET/HEAD/OPTIONS/TRACE/PUT/DELETE）；
+  #    POST 等非幂等方法默认不重试，此值会被忽略 —— 避免"请求其实到了、只是响应丢了"
+  #    的情况下重试，真的创建出两份数据。详见 core/http_client.py 的 _IDEMPOTENT_METHODS。
   retry_times: 1
   headers:
     Content-Type: "application/json"
@@ -12,7 +15,7 @@ dev:
 test:
   base_url: "http://127.0.0.1:8000"
   timeout: 10
-  retry_times: 1
+  retry_times: 1        # 同上：仅幂等方法生效
   headers:
     Content-Type: "application/json"
 
@@ -20,11 +23,13 @@ test:
 prod:
   base_url: "https://api.example.com"
   timeout: 15
-  retry_times: 2
+  retry_times: 2        # 同上：仅幂等方法生效
   headers:
     Content-Type: "application/json"
 
 # 登录依赖的默认账号（演示用）
+# ⚠️ 这里是**明文**演示账号 —— 对本地 Mock 无害，但真实项目应改为从环境变量 / CI 凭据读取
+#    （本项目 scripts/notify.py 的 WECOM_WEBHOOK_KEY 已经是这个模式：key 只从环境变量读，不进仓库）
 login:
   username: admin
   password: "123456"

@@ -21,7 +21,7 @@
       （只有你在、想起来才跑；忘了跑没人知道；历史结果无处追溯）
 
 自动：凌晨 2:00 Jenkins 自动 → git pull → pip install → python run.py --ci
-      → 记录 15 通过 / 0 失败 → 渲染 Allure 报告 → 失败发通知
+      → 记录 20 通过 / 0 失败 → 渲染 Allure 报告 → 失败发通知
 ```
 
 ---
@@ -151,9 +151,11 @@ docker run -d --name jenkins -p 8080:8080 -p 50000:50000 ^
 
 > **关键坑：Windows 服务的 PATH**。若 Jenkins 是以 Windows 服务方式安装的，
 > 它跑在另一个用户会话下，可能找不到 `python` 命令。
-> 解决方式二选一：
-> - 在 **Manage Jenkins → Nodes → 节点 → Configure → Environment variables** 里加 `PATH` 指向 Python 目录；
-> - 或把 Jenkinsfile 里的 `python` 改成完整路径，如 `C:\Python311\python.exe`（更稳）。
+>
+> **本项目已用「配置即代码」解决了它**：Jenkinsfile 的 `environment` 块里定义了 `PYTHON` **绝对路径**，
+> 所有步骤都用 `"%PYTHON%"` 调用（**不依赖节点的 PATH**）。
+> ⇒ 这与「坑 6」（界面里改坏全局 `PATH` 导致 `cmd` 都找不到）是同一条教训的两种解法 ——
+> **把路径写进 Jenkinsfile，可 review、可追溯、换节点只改一处。**
 
 ---
 
@@ -163,7 +165,11 @@ docker run -d --name jenkins -p 8080:8080 -p 50000:50000 ^
 |---|---|---|
 | **手动** | 任务页点「Build Now」 | 第一次验证，必须先用这个跑通 |
 | **定时** | Jenkinsfile 里已有 `cron('H 2 * * *')` | 冒烟/巡检场景，最实用 |
-| **提交触发** | GitHub 仓库 Settings → Webhooks → `<jenkins地址>/github-webhook/` | 团队协作，改代码即跑 |
+| **提交触发（SCM 轮询）** ⭐ | Jenkinsfile 里已有 `pollSCM('H/15 * * * *')` | **本项目实际采用**：每约 15 分钟轮询一次 Gitee，有变更就构建 |
+| **Webhook 回调** | 仓库 Settings → Webhooks → `<jenkins地址>/github-webhook/` | ⚠️ **本项目不可用**：Jenkins 跑在本机、无公网可达地址，仓库的回调请求打不进来 |
+
+> ⚠️ **pollSCM 只轮询【任务里配置的那一个仓库 URL】** —— 本项目 Jenkins 从 **Gitee** 拉代码，
+> 所以**只推 GitHub 等于没推**，Jenkins 看不到变化。⇒ 推送必须两边都做（本项目用 `git pushall` 别名）。
 
 > `H 2 * * *` 里的 `H` 是 Jenkins 特有的「散列」写法：把执行时刻随机分散到 2 点这一小时内的某分钟，
 > 避免多个任务在整点抢资源。写成 `0 2 * * *` 就是硬编码 2:00 整。
@@ -285,16 +291,24 @@ Duplicate build condition name: "always" @ line 106.
 - 消息文案写着"接口自动化测试失败"（`notify.py` 里硬编码）—— 此时你验的是**通道通不通**，不是文案准不准 ✅
 - Replay 的改动**只存在于这一次运行**，不写仓库、不改配置、可反复试 ✅
 
-**③ Jenkinsfile 的 `failure` 块**（本项目已写好）
+**③ Jenkinsfile 的 `failure` 块**（本项目已写好 —— **含凭据绑定**）
 
 ```groovy
 failure {
     echo 'API tests failed, check the Allure report for details'
+
     dir('01-api-test-framework') {
-        bat '"%PYTHON%" scripts/notify.py'
+        // ⚠️ 凭据 ID 必须与你在 Jenkins 里创建的 Secret text 凭据一致
+        withCredentials([string(credentialsId: 'wecom-webhook-key', variable: 'WECOM_WEBHOOK_KEY')]) {
+            bat '"%PYTHON%" scripts/notify.py'
+        }
     }
 }
 ```
+
+> ⚠️ **两层 vs 三层**：只写 `dir { bat }` 时，脚本只能读到**全局环境变量**里的 key；
+> 要用**凭据**（更安全、推荐长期用），必须补上 `withCredentials` 这一层。
+> 缺了它 + 没建凭据二者之一，都会让通知发不出去（前者静默跳过、后者直接报 `CredentialNotFoundException`）。
 
 **④ `scripts/notify.py` 的三个设计点（值得理解，也是可讲的点）**
 
@@ -321,7 +335,7 @@ failure {
 | `allure` 步骤报错 `No such DSL method` | 缺 Allure 插件 | 装 Allure Jenkins Plugin 并重启 |
 | `junit` 步骤报错找不到文件 | 上一阶段就崩了，没产出 XML | 已加 `allowEmptyResults: true`；重点看控制台日志 |
 | 日志/报告中文乱码 | Windows 控制台默认 GBK | Jenkinsfile 已设 `PYTHONIOENCODING=utf-8` |
-| `python: 不是内部或外部命令` | Jenkins 服务用户 PATH 没有 Python | 配节点环境变量，或写 Python 完整路径 |
+| `python: 不是内部或外部命令` | Jenkins 服务用户 PATH 没有 Python | **本项目已解决**：Jenkinsfile 用 `environment.PYTHON` 绝对路径 + `"%PYTHON%"` 调用，不依赖节点 PATH；自定义时照此模式改 |
 | `Connection refused` / 全部用例连接失败 | Mock 服务没起来，或端口被占 | `run.py` 已自动探测空闲端口；查日志里打印的实际端口 |
 | Allure 报告用例数对不上 | 上轮结果没清导致累积 | `run.py` 已每轮清空 `allure-results`（除非手动加 `--no-clean`） |
 | 构建永远绿 | 没让测试失败影响退出码 | 本项目 `run.py` 已直接返回 pytest 退出码 |

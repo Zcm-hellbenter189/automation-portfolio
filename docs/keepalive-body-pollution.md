@@ -623,15 +623,30 @@ host, port = self.client_address[:2]      # ✅ 切片取前两个
 host, port, *_ = self.client_address      # ✅ 星号兜住多余元素
 ```
 
-**标准库自己就是这么写的** —— `BaseHTTPRequestHandler.address_string()`：
+**标准库自己是怎么写的？** —— `BaseHTTPRequestHandler.address_string()`：
+
+**Python 3（本项目环境 3.12）的实际实现**：
 
 ```python
 def address_string(self):
-    host, port = self.client_address[:2]      # ← 用 [:2] 而不是 [0], [1]
-    return socket.getfqdn(host)
+    """Return the client address."""
+    return self.client_address[0]      # ← 只取 IP：不含端口，也不做 FQDN 反查
 ```
 
-**本项目 `log_message` 里调用的 `self.address_string()` 就是它** —— 顺着这条线可以直接看到标准库的写法，这是个很好的"读源码"入口。
+**Python 2 的实现与它不同**（很多老教程仍在引用，容易看串）：
+
+```python
+def address_string(self):
+    host, port = self.client_address[:2]      # ← 用 [:2] 切片，避免 IPv6 四元组解构报错
+    return socket.getfqdn(host)               # ← 还会做一次 DNS 反查
+```
+
+> ⚠️ **差别要记住**：Python 3 改成只返回 IP，是因为 `getfqdn()` 会触发 DNS 查询 ——
+> 在高频访问日志里可能造成可观的阻塞。
+> **本项目 `log_message` 打印的就是客户端 IP**（形如 `127.0.0.1`，不含端口）。
+
+**⇒ 但仍然值得顺这条线去读标准库源码** —— `http/server.py` 里 `address_string` / `log_message` / `log_request` 三者连着看，
+能看清"一个请求处理完 → 打印一行访问日志"的完整路径，这是个很好的"读源码"入口。
 
 ---
 
@@ -653,7 +668,7 @@ def address_string(self):
 ⑤ 连续 5 次 GET            → 全部 401 ✅
 ```
 
-全量用例：**18 / 18 通过**。
+全量用例：**18 / 18 通过**（**当时**套件规模为 18 条；修复后陆续补了 2 条回归用例，现为 **20 条全绿**）。
 
 ### 另一种解法：「在每个 `return` 前先读 body」行不行？
 
@@ -807,24 +822,41 @@ def _read_raw_body(self):
 
 ---
 
-## 八、建议补的回归用例
+## 八、回归用例（✅ 已落地 · 含变异自检结果）
 
-这个缺陷**必须有用例守住**，否则下次谁加一个"提前 return 的 handler"就会复发：
+这个缺陷**必须有用例守住**，否则下次谁加一个"提前 return 的 handler"就会复发。
+
+**现状（2026-09-27）**：用例已加入 `testcases/test_order.py::test_keepalive_body_not_polluted`：
 
 ```python
 def test_keepalive_body_not_polluted(unauth_client):
-    """回归：鉴权失败且带 body 的 POST，不应污染同一条连接上的下一条请求
-
-    必须用同一个 client（= 同一条连接）才能复现；
-    换成两个独立 client 就永远测不出来。
-    """
+    """回归：鉴权失败且带 body 的 POST，不应污染同一条连接上的下一条请求"""
     # ① 先制造残留：带 body 的 POST，且鉴权失败会提前 return
-    r1 = unauth_client.post("/api/orders", json={"user_id": 1, "product": "x", "amount": 1})
-    assertions.assert_status_code(r1, 401)
+    resp_post = unauth_client.post("/api/orders", json={"user_id": 1, "product": "x", "amount": 1})
+    assertions.assert_status_code(resp_post, 401)
     # ② 同一条连接再发 GET：必须是 401，而不是标准库抛的 400
-    r2 = unauth_client.get("/api/users")
-    assertions.assert_status_code(r2, 401)
+    resp_get = unauth_client.get("/api/users")
+    assertions.assert_status_code(resp_get, 401)
 ```
 
-**变异测试自检**：把 `do_POST` 里的 `self._consume_body()` 注释掉 → 这条用例**必须变红**；恢复后**必须变绿**。
-（这是确认用例真正有效、而非"恰好通过"的唯一办法。）
+### 变异自检结果（实测）
+
+把 `do_POST` 里的 `self._consume_body()` 注释掉后跑全量：
+
+```
+通过      : 18 ✅
+失败      : 1  ❌
+FAILED testcases/test_order.py::test_keepalive_body_not_polluted
+```
+
+**恰好 1 条失败，正是这条新用例** —— 它在守门，而不是"恰好通过"。
+
+**但真正有价值的发现是另一半**：
+
+> **原来的 18 条用例，对这个缺陷全都没有检测力。**
+
+它们当初"抓到了"这个 bug，靠的是 `unauth_client` 共享连接 + 文件名字典序的**巧合**，而不是设计：
+一旦换夹具作用域、改文件名、删掉 `test_place_order_without_token`、或加 `-n 4` 并行，
+缺陷就会重新隐形。
+
+**⇒ 这就是「偶然覆盖」与「必然守住」的区别**，也是补这条用例的全部意义。

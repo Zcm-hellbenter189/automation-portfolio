@@ -41,13 +41,48 @@ def test_register_without_token(client, case):
         assertions.assert_code(resp, expect["code"])
         assertions.assert_required_fields(resp, ["id", "name", "age"])
 
-@pytest.mark.parametrize("workers", [pytest.param(8, id="并发8线程-恰好1个成功200其余400")])
+
+def test_register_duplicate_name_rejected(client):
+    """同名二次注册应被拒绝：第一次 200，第二次 400 + 业务码 1006
+
+    为什么要单独一条：`test_register_without_token` 只验证"能注册成功"，
+    并没有验证"重名会被拒绝"这个唯一性约束本身 —— 而后者才是
+    `_handle_register` 里那段判重逻辑存在的意义。
+
+    用例自给自足：内部用时间戳造一个唯一名，先注册成功、再用同名注册一次。
+    不依赖外部数据、也不依赖其他用例的执行顺序（Mock 数据活在进程内存里，
+    每次运行都是干净的，所以这个"唯一名"不会与历史数据冲突）。
+    """
+    name = f"重名测试_{int(time.time() * 1000)}"
+
+    # ① 第一次：正常注册成功
+    first = client.post("/api/register", json={"name": name, "age": 20})
+    assertions.assert_status_code(first, 200)
+    assertions.assert_code(first, 0)
+
+    # ② 第二次：同名 → 400 + 1006（拒绝式去重：返回的是"错误"，不是首次成功的结果）
+    second = client.post("/api/register", json={"name": name, "age": 21})
+    assertions.assert_status_code(second, 400)
+    assertions.assert_code(second, 1006)
+
+
+@pytest.mark.parametrize("workers", [pytest.param(8, id="并发8线程-恰好1个成功200其余400/1006")])
 def test_register_concurrent_same_name(client,auto_login,workers):
     """并发同名注册：恰好 1 个成功，其余全部 1006，且库里只有 1 条
 
-       这是"判重与写入在同一临界区"的证据：若判重退回锁外，
-       这里会稳定出现多个 200（把 bug 复现出来）。
-       """
+    ⚠️ 关于这条用例的「检测力」，有一个**被实测修正过的结论**，别理解错：
+
+    它给出的是【响应分布 + 库内数据】两层证据，能说明"当前实现下并发语义符合预期"；
+    但它**抓不到"判重被挪回锁外"这一种变异** —— 实测 0/8、0/3 轮全部存活
+    （详见 docs/concurrency-test-verification-01.md）。
+
+    原因是本地 Mock 的判重窗口只有 μs 级，短于 CPython 的 5ms 线程切换间隔：
+    线程来不及在这个窗口里被调度，"竞态"根本没机会发生。
+    只有**同时注入 ≥1ms 的可控延迟**，这条用例才会稳定变红。
+
+    ⇒ 所以：**不要把它当作"修复有效"的证明**，它只是"当前行为符合预期"的证据。
+       真实系统的判重通常要 1~50ms（远超时间片），那时它才有区分力。
+    """
     # 起线程之前生成一次 → 8 个线程共享同一个 name（竞态的前提）
     name = f"并发用户_{int(time.time() * 1000)}"
     barrier = threading.Barrier(workers, timeout=10) # 起跑线：到齐才放行

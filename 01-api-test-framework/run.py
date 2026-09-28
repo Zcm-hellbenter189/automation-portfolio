@@ -6,13 +6,13 @@
   python run.py --ci                         # CI 模式：额外产出 JUnit XML 与 Allure 结果
 
 参数说明:
-  --port N      Mock 服务端口（默认 8000，被占用时自动向后探测空闲端口）
-  --env NAME    运行环境，取 config/config.yaml 顶层 key（dev/test/prod，默认 dev）
-  -m EXPR       pytest marker 表达式（如 "not slow"；不传 = 全量执行，CI 用全量）
-  --junitxml    产出 reports/junit.xml（Jenkins 原生用例趋势图，pytest 内置能力）
-  --allure      产出 reports/allure-results（需 pip install allure-pytest）
-  --ci          等价于 --junitxml --allure，供 Jenkinsfile 调用
-  --no-clean    保留上一轮 allure-results（默认每轮先清空，避免新旧结果混杂）
+  --port N           Mock 服务端口（默认 8000，被占用时自动向后探测空闲端口）
+  --env NAME         运行环境，取 config/config.yaml 顶层 key（dev/test/prod，默认 dev）
+  -m, --marker EXPR  pytest marker 表达式（如 "not slow"；不传 = 全量执行，CI 用全量）
+  --junitxml         产出 reports/junit.xml（Jenkins 原生用例趋势图，pytest 内置能力）
+  --allure           产出 reports/allure-results（需 pip install allure-pytest）
+  --ci               等价于 --junitxml --allure，供 Jenkinsfile 调用
+  --no-clean         保留上一轮 allure-results（默认每轮先清空，避免新旧结果混杂）
 
 实现说明:
   - 端口被占用时自动向后探测空闲端口继续运行（原实现只能报错退出）；

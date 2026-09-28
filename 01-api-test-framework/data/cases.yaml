@@ -1,5 +1,10 @@
 # 数据驱动用例数据：一条数据 = 一条用例
 # 新增用例只需在这里加一行，不需要改测试代码
+#
+# 关于 expect.code（业务码）：这里**只就地注释用到的那个**，
+# 完整清单与它们的 HTTP 配套关系见 mock_server.py 的模块 docstring（唯一定义处）。
+# 测试里坚持写数字字面量、不 import 服务端常量 —— 因为测试扮演的是"独立客户端"，
+# 只应认契约；若共享常量，服务端把值改错了测试反而会跟着变绿。
 
 login:
   - name: "管理员正确账号密码登录成功"
@@ -8,26 +13,26 @@ login:
       password: "123456"
     expect:
       status_code: 200
-      code: 0
+      code: 0           # 0 = 成功
   - name: "密码错误返回401"
     payload:
       username: admin
       password: "wrong-password"
     expect:
       status_code: 401
-      code: 1001
+      code: 1001        # 1001 = 未登录 / 用户名或密码错误
   - name: "缺少用户名返回400"
     payload:
       password: "123456"
     expect:
       status_code: 400
-      code: 1002
+      code: 1002        # 1002 = 参数缺失或格式错误
   - name: "缺少密码返回400"
     payload:
       username: admin
     expect:
       status_code: 400
-      code: 1002
+      code: 1002        # 1002 = 参数缺失或格式错误
 
 create_user:
   - name: "正常创建管理员(要token)"
@@ -36,28 +41,27 @@ create_user:
       age: 25
     expect:
       status_code: 200
-      code: 0
+      code: 0           # 0 = 成功
   - name: "缺少姓名返回400"
     payload:
       age: 25
     expect:
       status_code: 400
-      code: 1002
+      code: 1002        # 1002 = 参数缺失或格式错误
 
 register_user:
   - name: "注册新用户(不要token)"
-    unique_name: true
+    unique_name: true   # 告诉用例"这个名字要拼时间戳后缀"，避免跨轮次重名（1006）
     payload:
       name: "王五"
       age: 23
 
     expect:
       status_code: 200
-      code: 0
+      code: 0           # 0 = 成功
   - name: "缺少姓名返回400"
     payload:
       age: 25
     expect:
       status_code: 400
-      code: 1002
-
+      code: 1002        # 1002 = 参数缺失或格式错误

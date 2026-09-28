@@ -3,15 +3,32 @@
 
 启动: python mock_server.py --port 8000
 
-提供接口:
+提供接口（✅ = 需要携带 Authorization 鉴权头）:
   POST /api/register            公开注册（无需登录）
   POST /api/login               登录，成功返回 token
-  GET  /api/users               用户列表（需要 Authorization）
-  POST /api/users               创建用户
-  GET  /api/users/{id}          查询用户
-  POST /api/orders              下单（依赖已存在的 user_id）
+  GET  /api/users               用户列表                                 ✅
+  POST /api/users               创建用户                                 ✅
+  GET  /api/users/{id}          查询单个用户                              ✅
+  PUT  /api/users/{id}          全量更新用户（name/age 均必填，覆盖式语义）   ✅
+  POST /api/orders              下单（依赖已存在的 user_id）                ✅
   GET  /api/slow                慢响应 3 秒（演示响应时间断言）
   GET  /api/error               恒返回 500（演示异常场景）
+
+业务码（响应体里的 `code` 字段 —— **本文件是唯一定义处，README 里的表以它为准**）:
+  0     成功
+  1001  未登录 / 用户名或密码错误     （HTTP 401）
+  1002  参数缺失或格式错误            （HTTP 400）
+  1003  用户不存在                    （HTTP 404；查询/更新单个用户时）
+  1004  接口不存在                    （HTTP 404）
+  1005  用户不存在，无法下单          （HTTP 400）
+  1006  用户名已存在                  （HTTP 400）
+  5000  服务器内部错误                （HTTP 500）
+
+⚠️ 已知契约瑕疵（如实记录，暂不修改）:
+  - 1003 与 1005 语义重复（都是"用户不存在"），但配套 HTTP 状态不同（404 / 400）；
+  - 1001 同时表示"密码错误"与"未登录"；1002 同时表示"缺参数"与"格式错误"。
+  修改需要同步改动多处发送点与用例断言，收益仅为"契约更整洁"，当前封版阶段不划算。
+  ⇒ 写接口文档的价值，恰恰在于让这类不一致"刺眼"地暴露出来。
 
 设计意图: 本地 mock 保证「任何环境 clone 下来必定能跑通」，
          且能刻意构造 401/400/404/500/慢响应 等外网 API 难以稳定的场景。
@@ -31,36 +48,44 @@ class MockHTTPServer(ThreadingHTTPServer):
 class MockHandler(BaseHTTPRequestHandler):
     """内存态存储放在类属性上，所有请求实例共享
 
-    并发安全: ThreadingHTTPServer 每个请求一个实例，
-    自增 id 与字典写入统一由 _lock（类级）保护，避免并发重复 id。f
+    并发安全: ThreadingHTTPServer 的实例生命周期是「**每条连接一个**」——
+    同一个 handler 实例会服务该连接上的**所有**请求（已实测确认，
+    详解见下方 handle_one_request 的说明）。
+    自增 id 与字典写入统一由 _lock（类级）保护，避免并发重复 id。
     """
     protocol_version = "HTTP/1.1" # 协议版本号，设置1.1
     users = {}  # "用户表"：{id: 用户dict}，全进程共享
-    orders = {}  # "订单表"：{order_id: 订单dict}
-    idempotency_key={} # 幂等键表：{idempotency_key: 幂等键表dict}
+    orders = {}  # "订单表"：{order_id: 订单dict}（只写不读：当前没有"查询订单"接口）
     next_user_id = 1  # 下一个用户的 id（从 1 递增）
     next_order_id = 1001  # 下一个订单 id（从 1001 递增，故意和用户 id 区分开）
     _lock = threading.Lock()  # 一把共享锁（下划线开头=内部用）
 
     # ---------- 基础方法 ----------
     def log_message(self, fmt, *args):
-        """输出mock服务控制台日志
-        fmt为百分号格式化模板，*args为填充模板的可变参数。
-        输出示例：[mock] 127.0.0.1:8000 method=POST path=/api/user code=200
+        """输出 mock 服务控制台日志（覆盖父类实现 —— 父类默认是写 stderr）
+
+        fmt 是百分号格式化模板，*args 是填充模板的可变参数。
+        父类 log_request() 调用时传入的实际形态是：
+            log_message('"%s" %s %s', requestline, code, size)
+        所以终端上看到的真实输出形如：
+            [mock] 127.0.0.1 "POST /api/register HTTP/1.1" 200 55
+
         :param fmt: 带 %s/%d 占位符的日志模板字符串
         :param args: 待填入模板的可变参数元组
         """
-        # address_string 获取服务地址端口；fmt % args 将参数填充到模板
+        # ⚠️ address_string() 返回的是【客户端 IP】，不是"服务地址端口"：
+        #    Python 3 的实现是 `return self.client_address[0]` —— 只取 IP、不含端口，
+        #    也不做 FQDN 反查（Python 2 才是 getfqdn + 端口的形式）
         print(f"[mock] {self.address_string()} {fmt % args}")
 
     def _send(self, status, payload):
         """返回JSON格式HTTP响应
         :param status: HTTP状态码，如200、400
         :param payload: python字典/列表，要返回给客户端的业务数据
-        - `Content‑Type`：告诉客户端：body 里面是什么格式的数据、用什么编码。
-        -`Content‑Length`：告诉客户端：body 一共有多少字节，你从 socket 字节流里读完这么多字节，本次响应就结束。
+        - `Content-Type`：告诉客户端：body 里面是什么格式的数据、用什么编码。
+        - `Content-Length`：告诉客户端：body 一共有多少字节，你从 socket 字节流里读完这么多字节，本次响应就结束。
         """
-        # 将payload序列化为json字符串，转成utf‑8字节流。 HTTP传输只能传字节
+        # 将 payload 序列化为 json 字符串，转成 utf-8 字节流。HTTP 传输只能传字节
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         # # 写入状态行：HTTP/1.1 200 OK  →内存缓冲区
         self.send_response(status)
@@ -143,8 +168,6 @@ class MockHandler(BaseHTTPRequestHandler):
             这类看起来毫无道理的报错。
         """
         self._body_cache = None   # None = 本次请求的 body 尚未读取
-        # 临时调试：实例内存地址 + 客户端源端口
-        print(f"[mock] 新请求 | 实例={id(self)} | 客户端源端口={self.client_address[1]}")
         super().handle_one_request()
 
     def _is_authed(self):
@@ -210,7 +233,17 @@ class MockHandler(BaseHTTPRequestHandler):
             self._send(404, {"code": 1004, "msg": "接口不存在"})
 
     def do_PUT(self):
-        """跟上面do_POST一样"""
+        """PUT 请求的路由入口：按 URL 前缀分发给更新接口
+
+        ⚠️ 与 do_POST / do_GET 的差异（**已知缺口，如实记录、暂不修改**）：
+        这里**没有 else 兜底分支** —— 若 PUT 到一个未匹配的路径（例如 /api/unknown），
+        本方法不会发送任何响应，客户端会一直挂起直到超时；
+        而 POST / GET 遇到未知路径都会回 404 + 业务码 1004。
+
+        按 REST 语义应当补一个 else 走统一 404。本项目在封版阶段选择
+        **如实记录而非改动行为**（改它需同步更新 README 业务码表"1004 = 未匹配到任何路由"
+        这条描述，且没有用例覆盖该路径）。
+        """
         # 先消费请求体：更新接口在"鉴权失败"时同样会提前 return
         self._consume_body()
         if self.path.startswith("/api/users/"):
